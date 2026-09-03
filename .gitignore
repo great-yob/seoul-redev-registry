@@ -1,0 +1,17 @@
+# 산출물 — 레지스트리에서 필요할 때 생성. 원본이 아니므로 커밋하지 않는다
+exports/
+*.xlsx
+*.xls
+*.csv
+
+# 임시
+.DS_Store
+Thumbs.db
+*.tmp
+*~
+
+# 로컬 메모
+scratch/
+
+# 환경변수
+.env
