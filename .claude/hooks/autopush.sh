@@ -17,6 +17,9 @@ if [ -z "$(git status --porcelain)" ]; then
   exit 0
 fi
 
+# 보류 마커가 있으면 아무것도 하지 않고 조용히 종료 (사용자가 커밋 보류를 요청한 턴)
+[ -f ".claude-hold" ] && exit 0
+
 git add -A 2>/dev/null || exit 0
 
 git commit -q -F - <<'MSG' 2>/dev/null || exit 0
