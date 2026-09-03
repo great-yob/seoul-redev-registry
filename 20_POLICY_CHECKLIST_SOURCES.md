@@ -167,3 +167,4 @@
 - 서울주거포털 보도자료 — https://housing.seoul.go.kr
 - 토지이음(고시·토지이용계획) — http://www.eum.go.kr
 - 서울시 도시계획포털 고시자료 — https://urban.seoul.go.kr
+<!-- hook-test 2026-09-03 -->
