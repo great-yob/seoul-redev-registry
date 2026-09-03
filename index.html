@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>서울 재개발 구역 투자 레지스트리</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --accent: #2563eb;
+    --code-bg: #f3f4f6;
+    --tab-bg: #f9fafb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #e5e7eb;
+      --muted: #9ca3af;
+      --border: #2c2f36;
+      --accent: #60a5fa;
+      --code-bg: #1e2126;
+      --tab-bg: #1a1d22;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+    line-height: 1.6;
+  }
+  header {
+    padding: 24px 20px 0;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.4rem;
+    margin: 0 0 4px;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-bottom: 16px;
+  }
+  nav.tabs {
+    display: flex;
+    gap: 4px;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  nav.tabs button {
+    background: var(--tab-bg);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    color: var(--fg);
+    padding: 10px 16px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    white-space: nowrap;
+    margin-bottom: -1px;
+  }
+  nav.tabs button.active {
+    background: var(--bg);
+    border-bottom: 1px solid var(--bg);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  main {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 24px 20px 80px;
+  }
+  .doc { display: none; }
+  .doc.active { display: block; }
+  .doc-meta {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-bottom: 16px;
+  }
+  .doc-meta a {
+    color: var(--accent);
+  }
+  .content {
+    font-size: 0.92rem;
+    word-break: keep-all;
+  }
+  .content h1, .content h2, .content h3 {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+  }
+  .content table {
+    border-collapse: collapse;
+    width: 100%;
+    display: block;
+    overflow-x: auto;
+    font-size: 0.85rem;
+  }
+  .content th, .content td {
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    text-align: left;
+  }
+  .content th {
+    background: var(--code-bg);
+  }
+  .content code {
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.88em;
+  }
+  .content pre {
+    background: var(--code-bg);
+    padding: 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+  }
+  .content pre code {
+    background: none;
+    padding: 0;
+  }
+  .content blockquote {
+    border-left: 3px solid var(--accent);
+    margin: 0;
+    padding: 2px 14px;
+    color: var(--muted);
+  }
+  .loading, .error {
+    color: var(--muted);
+    padding: 40px 0;
+    text-align: center;
+  }
+  .error { color: #dc2626; }
+</style>
+</head>
+<body>
+<header>
+  <h1>서울 재개발 구역 투자 레지스트리</h1>
+  <div class="subtitle">00_PROJECT_BRIEF · 10_REGION_REGISTRY · 20_POLICY_CHECKLIST_SOURCES · <span id="repo-link"></span></div>
+</header>
+
+<nav class="tabs" id="tabs"></nav>
+
+<main id="main">
+  <div class="loading">불러오는 중…</div>
+</main>
+
+<script>
+const REPO = "great-yob/seoul-redev-registry";
+const BRANCH_DISPLAY_FALLBACK = "main";
+
+const DOCS = [
+  { id: "brief", file: "00_PROJECT_BRIEF.md", label: "00 · 프로젝트 브리프" },
+  { id: "registry", file: "10_REGION_REGISTRY.md", label: "10 · 구역 레지스트리" },
+  { id: "policy", file: "20_POLICY_CHECKLIST_SOURCES.md", label: "20 · 정책·체크리스트·출처" },
+];
+
+document.getElementById("repo-link").textContent = REPO;
+
+const tabsEl = document.getElementById("tabs");
+const mainEl = document.getElementById("main");
+
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s가-힣-]/g, "")
+    .replace(/\s+/g, "-");
+}
+
+marked.setOptions({
+  gfm: true,
+  breaks: false,
+});
+
+async function loadDoc(doc) {
+  const res = await fetch(doc.file, { cache: "no-store" });
+  if (!res.ok) throw new Error(`${doc.file} 로드 실패 (HTTP ${res.status})`);
+  const text = await res.text();
+  return marked.parse(text);
+}
+
+function activate(id) {
+  document.querySelectorAll(".doc").forEach(el => el.classList.toggle("active", el.id === "panel-" + id));
+  document.querySelectorAll("nav.tabs button").forEach(btn => btn.classList.toggle("active", btn.dataset.id === id));
+  if (history.replaceState) history.replaceState(null, "", "#" + id);
+}
+
+async function init() {
+  DOCS.forEach(doc => {
+    const btn = document.createElement("button");
+    btn.textContent = doc.label;
+    btn.dataset.id = doc.id;
+    btn.addEventListener("click", () => activate(doc.id));
+    tabsEl.appendChild(btn);
+  });
+
+  mainEl.innerHTML = "";
+
+  const results = await Promise.allSettled(DOCS.map(loadDoc));
+
+  DOCS.forEach((doc, i) => {
+    const panel = document.createElement("div");
+    panel.className = "doc";
+    panel.id = "panel-" + doc.id;
+
+    const meta = document.createElement("div");
+    meta.className = "doc-meta";
+    meta.innerHTML = `<a href="https://github.com/${REPO}/blob/${BRANCH_DISPLAY_FALLBACK}/${doc.file}" target="_blank" rel="noopener">${doc.file} (GitHub에서 보기)</a>`;
+    panel.appendChild(meta);
+
+    const content = document.createElement("div");
+    content.className = "content";
+    const r = results[i];
+    if (r.status === "fulfilled") {
+      content.innerHTML = r.value;
+    } else {
+      content.innerHTML = `<div class="error">${r.reason.message}</div>`;
+    }
+    panel.appendChild(content);
+
+    mainEl.appendChild(panel);
+  });
+
+  const initial = (location.hash || "").replace("#", "") || DOCS[0].id;
+  const validId = DOCS.some(d => d.id === initial) ? initial : DOCS[0].id;
+  activate(validId);
+}
+
+init();
+</script>
+</body>
+</html>
