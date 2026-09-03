@@ -15,3 +15,6 @@ scratch/
 
 # 환경변수
 .env
+
+# 커밋 보류 마커 (autopush 훅 참조)
+.claude-hold
