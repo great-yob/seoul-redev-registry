@@ -2,11 +2,13 @@
 
 GitHub Actions(.github/workflows/listings.yml)가 매주 금요일 04:00 KST에 실행한다. 로컬에서도 같은 명령으로 돈다.
     python tools/collect_listings.py [--only sangdo16,jangwi15] [--dry-run] [--out DIR] [--summary FILE]
+                                     [--min-price 6.0] [--max-price 8.0]
 
 원칙 (DECISIONS #19)
 - 호가·매물은 D등급. 점수는 구역 내 상대 순위(100점, 랭크 정규화)이며 어떤 계산에도 쓰지 않는다.
+- 예산 필터: 호가가 PRICE_MIN 이상 PRICE_MAX 미만인 매물만 표에 남긴다. 범위 밖은 빼되 제외 건수·구역 호가 범위를 노트에 남긴다 — 조용히 빼지 않는다.
 - `## 매물` 절은 행 단위 수정이 아니라 절 통째 교체. 다른 줄은 건드리지 않는다.
-- 조용히 틀리지 않는다: 목록 페이지가 200이 아니거나 전 구역 합계 0건이면 exit 1 → CI 실패, 커밋 없음.
+- 조용히 틀리지 않는다: 목록 페이지가 200이 아니거나 전 구역 수집 합계(예산 필터 전) 0건이면 exit 1 → CI 실패, 커밋 없음.
 - 의존성: requests 뿐. .env 불필요.
 """
 import argparse
@@ -30,6 +32,10 @@ UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like 
 KST = dt.timezone(dt.timedelta(hours=9))
 W = dict(unit=30, share=25, floor=15, date=15, entry=15)
 LAND_TYPES = ('단독', '토지', '다가구')
+
+# 예산 필터 (사용자 2026-09-08 결정, DECISIONS #19 4차) — 실거주 기준 초기투자금(대출 포함) 상한 8억, 이상 구간 6~7억.
+# 호가 그대로 판정한다(취득세·중개비 별도, 빌라 약 4~5%). 주 1회 자동 갱신도 이 값으로 돈다. CLI 인자로만 덮어쓴다.
+PRICE_MIN, PRICE_MAX = 6.0, 8.0   # 억. PRICE_MIN 이상 ~ PRICE_MAX 미만
 
 # 구역 설정. basedate 는 레지스트리 확정값(없으면 None → 재개발닷컴 상세의 right_basedate 를 채점에만 사용).
 # anchor 는 노트에 찍는 기준 앵커 문구(레지스트리 요약). 구역 파일의 사실이 바뀌면 여기도 맞춘다.
@@ -161,7 +167,7 @@ def rank_score(vals, w, lower_better):
     return [w / 2 if v is None else w * (n - 1 - order.index(v)) / (n - 1) for v in vals]
 
 
-def score_zone(Z, asks, meta):
+def score_zone(Z, asks, meta, pmin, pmax):
     rings = [poly[0] for poly in (meta.get('areas') or [])]
     basedate, bsrc = Z['basedate'], '레지스트리'
     if not basedate:
@@ -225,6 +231,9 @@ def score_zone(Z, asks, meta):
             if r['is_land'] and r['unit'] and r['unit'] < 0.4 * med:
                 r['flags'].append(f'단가 이상치({r["unit"] / med * 100:.0f}% of 단독 중앙값) — 공유지분·오기 의심')
                 r['anom'] = True
+    n_dedup = len(rows)
+    span = (min(r['price'] for r in rows), max(r['price'] for r in rows)) if rows else None
+    rows = [r for r in rows if pmin <= r['price'] < pmax]   # 예산 필터. 점수·순위는 통과한 매물끼리만 매긴다
     su = rank_score([r['unit'] for r in rows], W['unit'], True)
     ss = rank_score([r['share'] for r in rows], W['share'], False)
     se = rank_score([r['price'] for r in rows], W['entry'], True)
@@ -252,7 +261,7 @@ def score_zone(Z, asks, meta):
     rows.sort(key=lambda r: (-r['score'], r['price']))
     for i, r in enumerate(rows):
         r['rank'] = i + 1
-    return rows, basedate, bsrc, bool(rings)
+    return rows, basedate, bsrc, bool(rings), n_dedup, span
 
 
 # ---------------------------------------------------------------- 링크 · md
@@ -280,15 +289,21 @@ def links(r):
     return out
 
 
-def render_md(Z, rows, n_registered, basedate, bsrc, has_poly, today):
-    L = ['## 매물 (참고 · D · 본표 편입 금지)', '']
+def render_md(Z, rows, n_registered, basedate, bsrc, has_poly, today, n_dedup, span, pmin, pmax):
+    L = ['## 매물 (참고 · D · 본표 편입 금지 · 예산 필터)', '']
     src = f'재개발닷컴 [{Z["title"]} 매물 페이지](https://jaegebal.com/develops/{Z["did"]}/asks) 자동 수집 {today}'
+    band = f'호가 {pmin:.2f}억 이상 {pmax:.2f}억 미만'
+    budget = f'예산 기준은 실거주 초기투자금(대출 포함) 상한 {pmax:.0f}억·이상 구간 {pmin:.0f}~{pmin + 1:.0f}억이며 호가 그대로 판정한다 — 취득세·중개비 별도(빌라 약 4~5%).'
+    rng = f' 필터 전 구역 호가 {span[0]:.2f}~{span[1]:.2f}억.' if span else ''
     if not rows:
-        L.append(f'{src} — 등록 매물 0건. 호가 자료 없음. 기준 앵커: {Z["anchor"]}.')
+        if n_registered == 0:
+            L.append(f'{src} — 등록 매물 0건. 호가 자료 없음. 기준 앵커: {Z["anchor"]}.')
+        else:
+            L.append(f'{src} — 등록 {n_registered}건, 중복 제거 {n_dedup}건, **예산 필터({band}) 통과 0건** — 표에 남길 매물이 없다.{rng} {budget} 기준 앵커: {Z["anchor"]}.')
         return '\n'.join(L) + '\n'
     bd = f'{basedate}({bsrc})' if basedate else '미확인'
     poly = '구역계 폴리곤(재개발닷컴) 대조 완료' + (' — 전 건 구역 내' if not any(r['inside'] is False for r in rows) else '') if has_poly else '구역계 폴리곤 없음 — 구역 내 여부 미대조'
-    L.append(f'{src} — 등록 {n_registered}건, 중복 제거 {len(rows)}건. **호가·매물이며 실거래가 아니다(D).** 점수는 구역 내 상대 순위(100점, 채점 규칙 DECISIONS #19)이며 어떤 계산에도 쓰지 않는다. 기준 앵커: {Z["anchor"]}. 권리산정기준일 {bd}. {poly}. 대지지분(≈)은 필지면적 × 전용/총연면적 근사.')
+    L.append(f'{src} — 등록 {n_registered}건, 중복 제거 {n_dedup}건, **예산 필터({band}) 통과 {len(rows)}건**({n_dedup - len(rows)}건 제외).{rng} **호가·매물이며 실거래가 아니다(D).** 점수는 필터를 통과한 매물 간 상대 순위(100점, 채점 규칙 DECISIONS #19)이며 어떤 계산에도 쓰지 않는다. {budget} 기준 앵커: {Z["anchor"]}. 권리산정기준일 {bd}. {poly}. 대지지분(≈)은 필지면적 × 전용/총연면적 근사.')
     L += ['', '| 순위 | 물건 | 점수 | 호가 | 유형 | 면적 | 층 | 사용승인 | 메모 | 링크 |', '| --: | :-- | --: | --: | :-- | :-- | :-- | :-- | :-- | :-- |']
     for r in rows:
         if r['is_land']:
@@ -311,8 +326,8 @@ def apply_section(path, block, dry_run):
     if idx is not None:
         end = next((i for i in range(idx + 1, len(lines)) if lines[i].startswith('## ')), len(lines))
         old = nl.join(lines[idx:end])
-        m = re.search(r'중복 제거 (\d+)건|등록 매물 (\d+)건', old)
-        prev = int(m.group(1) or m.group(2)) if m else None
+        m = re.search(r'통과 (\d+)건|중복 제거 (\d+)건|등록 매물 (\d+)건', old)
+        prev = int(next(g for g in m.groups() if g)) if m else None
         before = lines[:idx]
         while before and before[-1].strip() == '':
             before.pop()
@@ -336,7 +351,10 @@ def main():
     ap.add_argument('--dry-run', action='store_true', help='파일을 쓰지 않고 요약만')
     ap.add_argument('--out', help='생성한 md 블록을 이 디렉터리에 저장')
     ap.add_argument('--summary', help='커밋 메시지용 요약을 이 파일에 저장')
+    ap.add_argument('--min-price', type=float, default=PRICE_MIN, help=f'예산 필터 하한(억, 이상). 기본 {PRICE_MIN}')
+    ap.add_argument('--max-price', type=float, default=PRICE_MAX, help=f'예산 필터 상한(억, 미만). 기본 {PRICE_MAX}')
     args = ap.parse_args()
+    pmin, pmax = args.min_price, args.max_price
     only = set(args.only.split(',')) if args.only else None
     today = dt.datetime.now(KST).strftime('%Y-%m-%d')
     if args.out:
@@ -354,20 +372,23 @@ def main():
         for aid, a in asks.items():
             a['_detail'] = fetch_detail(Z['did'], aid)
             time.sleep(0.5)
-        rows, basedate, bsrc, has_poly = score_zone(Z, asks, meta)
-        block = render_md(Z, rows, len(asks), basedate, bsrc, has_poly, today)
+        rows, basedate, bsrc, has_poly, n_dedup, span = score_zone(Z, asks, meta, pmin, pmax)
+        block = render_md(Z, rows, len(asks), basedate, bsrc, has_poly, today, n_dedup, span, pmin, pmax)
         if args.out:
             open(os.path.join(args.out, f'md_{Z["name"]}.md'), 'w', encoding='utf-8').write(block)
         prev = apply_section(os.path.join(ROOT, 'regions', Z['file'] + '.md'), block, args.dry_run)
         top = ' · '.join(f'{r["addr"].split()[-1]}({r["score"]})' for r in rows[:3])
-        results.append(dict(title=Z['title'], prev=prev, now=len(rows), registered=len(asks), stage=meta.get('stage'), top=top))
-        print(f'{Z["title"]:12s} {prev if prev is not None else "-":>3} → {len(rows):3d}건 (등록 {len(asks)}, 단계 {meta.get("stage")}) 상위 {top}')
+        results.append(dict(title=Z['title'], prev=prev, now=len(rows), dedup=n_dedup, registered=len(asks), stage=meta.get('stage'), top=top))
+        print(f'{Z["title"]:12s} {prev if prev is not None else "-":>3} → {len(rows):3d}건 (등록 {len(asks)}, 중복 제거 {n_dedup}, 필터 제외 {n_dedup - len(rows)}, 단계 {meta.get("stage")}) 상위 {top}')
         time.sleep(1)
     total = sum(r['now'] for r in results)
-    lines = [f'auto-listings: 매물 절 갱신 {today} — {len(results)}구역 {total}건', '']
+    total_dedup = sum(r['dedup'] for r in results)
+    lines = [f'auto-listings: 매물 절 갱신 {today} — {len(results)}구역 {total}건 (예산 필터 {pmin:.1f}~{pmax:.1f}억)', '']
     for r in results:
-        lines.append(f'- {r["title"]}: {r["prev"] if r["prev"] is not None else "—"} → {r["now"]}건 · 상위 {r["top"] or "없음"}')
-    lines += [f'- 출처: 재개발닷컴 jaegebal.com/develops/{{id}}/asks ({today} 자동수집)', '- 등급: D (호가·매물, 계산 근거 아님)', '- 근거: 자동수집 tools/collect_listings.py · 채점 DECISIONS #19']
+        lines.append(f'- {r["title"]}: {r["prev"] if r["prev"] is not None else "—"} → {r["now"]}건 (중복 제거 {r["dedup"]}건 중 {r["dedup"] - r["now"]}건 범위 밖) · 상위 {r["top"] or "없음"}')
+    lines += [f'- 예산 필터: 호가 {pmin:.2f}억 이상 {pmax:.2f}억 미만 — 전 구역 {total_dedup}건 중 {total_dedup - total}건 제외',
+              f'- 출처: 재개발닷컴 jaegebal.com/develops/{{id}}/asks ({today} 자동수집)', '- 등급: D (호가·매물, 계산 근거 아님)',
+              '- 근거: 자동수집 tools/collect_listings.py · 채점 DECISIONS #19 · 예산 필터 DECISIONS #19 4차']
     if errors:
         lines += ['', '수집 실패:'] + [f'- {e}' for e in errors]
     summary = '\n'.join(lines) + '\n'
@@ -377,8 +398,8 @@ def main():
     if errors:
         print(f'FAIL  {len(errors)}개 구역 목록 페이지 수집 실패 — 커밋하지 않는다', file=sys.stderr)
         return 1
-    if results and total == 0:
-        print('FAIL  전 구역 0건 — 재개발닷컴 구조 변경 의심. 커밋하지 않는다', file=sys.stderr)
+    if results and total_dedup == 0:   # 필터 전 수집량으로 판정한다 — 예산 필터로 0건이 되는 것은 정상이다
+        print('FAIL  전 구역 수집 0건 — 재개발닷컴 구조 변경 의심. 커밋하지 않는다', file=sys.stderr)
         return 1
     return 0
 
