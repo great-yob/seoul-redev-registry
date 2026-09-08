@@ -177,14 +177,15 @@ const mdLinks = (s) => [...String(s ?? '').matchAll(/\[([^\]]+)\]\((https?:[^)\s
 function parseListings(r) {
   if (!r.list) return null;
   const t = r.list.table;
-  if (!t) { warn(`${r.file}: ## 매물 아래 표가 없다`); return null; }
+  const note = strip(r.list.note);
+  const meta = { note: note.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '$1'), noteLinks: mdLinks(note), date: (note.match(/\d{4}-\d{2}-\d{2}/) || [])[0] || null };
+  if (!t) return { ...meta, count: 0, items: [] };   // 절만 있고 표가 없으면 "수집 0건" — 노트만 보여준다
   for (const c of ['물건', '점수', '링크']) if (!t.header.includes(c)) { warn(`${r.file}: 매물 표에 '${c}' 열이 없다`); return null; }
   const items = t.rows.map((row) => ({
     rank: num(row['순위']), name: strip(row['물건']), score: num(row['점수']), price: strip(row['호가']), type: strip(row['유형']), area: strip(row['면적']), floor: strip(row['층']), links: mdLinks(row['링크']),
   })).filter((it) => it.name);
   for (const it of items) if (it.score === null) warn(`${r.file}: 매물 '${it.name}' 점수가 숫자가 아니다`);
-  const note = strip(r.list.note);
-  return { note: note.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '$1'), noteLinks: mdLinks(note), date: (note.match(/\d{4}-\d{2}-\d{2}/) || [])[0] || null, count: items.length, items };
+  return { ...meta, count: items.length, items };
 }
 function trustTags(r, row) {
   const h = r.est?.heading || '';
@@ -439,17 +440,24 @@ function regionPage(c, i) {
     + box(false, '구역계 필지 편입', '매수 필지별 확인')
     + box(c.stageDocGrade === 'A', '사업단계 문서', c.stageDocGrade ? c.stageDocGrade + '등급' : '고시문 확인');
   const ls = c.listings;
-  const listingsHtml = ls && ls.items.length ? (() => {
+  const listingsHtml = ls ? (() => {
     const top = ls.items.slice(0, 3);
-    const li = top.map((it) => `<li><span class="rk">${it.rank ?? ''}</span><div class="nm">${esc(it.name)}<small>${esc([it.price, it.type, it.floor && it.floor !== '—' ? (/층/.test(it.floor) ? it.floor : it.floor + '층') : ''].filter(Boolean).join(' · '))}</small></div><div class="sc"><b>${it.score ?? '—'}</b><i style="--w:${Math.max(0, Math.min(100, it.score ?? 0))}%"></i></div><div class="lk">${it.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a>`).join('')}</div></li>`).join('');
     const src = ls.noteLinks[0];
-    return `<div class="sec"><span>매수 후보 · 참고 <i class="grade d">D</i></span><em>${src ? `<a href="${esc(src.url)}" target="_blank" rel="noopener">${esc(src.label)}</a> · ` : ''}${esc(ls.date || '')} · 호가 · 상위 ${top.length} / ${ls.count}</em></div><ol class="ls">${li}</ol><div class="cav">${esc(cut(ls.note, 140))}</div>`;
+    const head = `<div class="sec"><span>매수 후보 · 참고 <i class="grade d">D</i></span><em>${src ? `<a href="${esc(src.url)}" target="_blank" rel="noopener">${esc(src.label)}</a> · ` : ''}${esc(ls.date || '')} · 호가 · ${top.length ? `상위 ${top.length} / ${ls.count}` : '0건'}</em></div>`;
+    if (!top.length) return head + `<div class="cav">${esc(cut(ls.note, 160))}</div>`;
+    // 링크 셀에 '모바일' 링크가 있으면 따로 그리지 않고 네이버 링크의 data-m 으로 붙인다 — 페이지 스크립트가 모바일 UA에서 href 를 바꾼다
+    const linkHtml = (links) => {
+      const mob = links.find((l) => /모바일/.test(l.label));
+      return links.filter((l) => l !== mob).map((l) => `<a href="${esc(l.url)}"${mob && /네이버/.test(l.label) ? ` data-m="${esc(mob.url)}"` : ''} target="_blank" rel="noopener">${esc(l.label)}</a>`).join('');
+    };
+    const li = top.map((it) => `<li><span class="rk">${it.rank ?? ''}</span><div class="nm">${esc(it.name)}<small>${esc([it.price, it.type, it.floor && it.floor !== '—' ? (/층/.test(it.floor) ? it.floor : it.floor + '층') : ''].filter(Boolean).join(' · '))}</small></div><div class="sc"><b>${it.score ?? '—'}</b><i style="--w:${Math.max(0, Math.min(100, it.score ?? 0))}%"></i></div><div class="lk">${linkHtml(it.links)}</div></li>`).join('');
+    return head + `<ol class="ls">${li}</ol><div class="cav">${esc(cut(ls.note, 140))}</div>`;
   })() : '';
   const dec = matchSecs(decisionSecs, c), src = matchSecs(sourceSecs, c);
   const folds = [
     { id: 'body', title: `원문 · 불릿 ${c.bullets}개`, size: kb(r.bodyMd), md: r.bodyMd },
     r.estMd ? { id: 'est', title: '추정 근거 사슬', size: kb(r.estMd), md: r.estMd } : null,
-    r.listMd ? { id: 'list', title: `매물 전체 ${ls ? ls.count : ''}건 · 점수 근거`, size: kb(r.listMd), md: r.listMd } : null,
+    r.listMd && ls && ls.count ? { id: 'list', title: `매물 전체 ${ls.count}건 · 점수 근거`, size: kb(r.listMd), md: r.listMd } : null,
     dec.length ? { id: 'dec', title: `판단 로그 · ${dec.map((s) => '#' + s.match(/^## (\d+)/)[1]).join(' ')}`, size: 'DECISIONS', md: dec.join('\n\n') } : null,
     src.length ? { id: 'src', title: '출처', size: '20_POLICY', md: src.join('\n\n') } : null,
   ].filter(Boolean);

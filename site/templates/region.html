@@ -42,6 +42,10 @@
 {{MD_BLOCKS}}
 <script>
 (function () {
+  // 네이버 부동산은 PC(new.land)와 모바일(m.land) URL 형식이 다르다. 모바일 UA면 data-m 링크로 바꾼다
+  if (/iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent)) {
+    document.querySelectorAll('a[data-m]').forEach(function (a) { a.href = a.getAttribute('data-m'); });
+  }
   var loading = null;
   function ensureMarked() {
     if (window.marked) return Promise.resolve();
