@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>서울 재개발 구역 레지스트리</title>
+<meta name="description" content="{{COUNT}}개 재개발 구역의 진행 단계와 안전마진을 한 화면에. {{VERSION}} · {{UPDATED}}">
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f6; --surface: #ffffff; --surface-2: #eef0ee;
+  --ink: #17191c; --ink-2: #4b5058; --ink-3: #7c828c;
+  --line: #e2e5e1; --line-2: #c9cec9;
+  --accent: #1c4f9c; --accent-soft: #e3ebf7;
+  --g-a: #2a78d6; --g-b: #1baf7a; --g-c: #eda100; --g-d: #8b8f98;
+  --ok-bg: #e2f5ec; --ok-ink: #0d5e3c; --bad-bg: #fbe4e4; --bad-ink: #8a1f1f; --warn-bg: #fff4dc; --warn-ink: #6b4300;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141618; --surface: #1c1f23; --surface-2: #24282d;
+    --ink: #eceef0; --ink-2: #b3b8c0; --ink-3: #858b95;
+    --line: #2b3036; --line-2: #3a4048;
+    --accent: #6ea3ee; --accent-soft: #1e2c40;
+    --g-a: #3987e5; --g-b: #199e70; --g-c: #c98500; --g-d: #a1a5ad;
+    --ok-bg: #12352a; --ok-ink: #7fd8b0; --bad-bg: #3d1c1c; --bad-ink: #f0a0a0; --warn-bg: #3a2e10; --warn-ink: #f2c96b;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", "Segoe UI", sans-serif;
+  font-size: 15px; line-height: 1.55; word-break: keep-all; -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 20px 16px 64px; }
+
+.eyebrow { font-size: 11px; letter-spacing: .05em; color: var(--ink-3); }
+h1 { font-size: 22px; font-weight: 700; line-height: 1.25; margin: 2px 0 12px; text-wrap: balance; }
+.sec { font-size: 11px; letter-spacing: .05em; color: var(--ink-3); font-weight: 500; margin: 22px 0 8px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 12px; }
+.sec em { font-style: normal; letter-spacing: 0; font-weight: 400; min-width: 0; }
+
+.kpis { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.kpi { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.kpi b { display: block; font-size: 24px; font-weight: 700; line-height: 1.1; }
+.kpi span { font-size: 11px; color: var(--ink-3); }
+
+.vmap { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.vrow { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); align-items: start; }
+.vrow:last-child { border-bottom: 0; }
+.vrow .st { font-size: 12.5px; font-weight: 700; line-height: 1.3; }
+.vrow .st small { display: block; font-weight: 400; color: var(--ink-3); font-size: 10.5px; }
+.vrow .ch { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.vrow.empty { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--surface-2) 6px 7px); }
+.vrow.empty .st { color: var(--ink-3); font-weight: 500; }
+.vrow.warn { background: var(--warn-bg); }
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 9px; border-radius: 5px; background: var(--accent-soft); border: 1px solid transparent; line-height: 1.3; min-height: 28px; }
+.chip.est { background: transparent; border: 1px dashed var(--line-2); color: var(--ink-2); }
+.chip.out { background: var(--surface-2); color: var(--ink-2); }
+.chip small { color: var(--ink-3); font-size: 10px; }
+
+.pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.pill { font-size: 12px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 14px; color: var(--ink-2); max-width: 100%; }
+.pill summary { list-style: none; cursor: pointer; padding: 5px 12px; min-height: 30px; display: flex; align-items: center; }
+.pill summary::-webkit-details-marker { display: none; }
+.pill b { color: var(--ink); font-weight: 700; margin-left: 4px; }
+.pill[open] { border-radius: 10px; flex-basis: 100%; }
+.pill p { margin: 0; padding: 0 12px 10px; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
+
+.grp { margin-top: 18px; }
+.grp-h { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 12px; margin: 0 0 6px; }
+.grp-h b { font-size: 13px; }
+.grp-h span { font-size: 11px; color: var(--ink-3); }
+.cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.card:active { background: var(--surface-2); }
+.card.est { border-style: dashed; box-shadow: none; }
+.card.out { background: var(--surface-2); box-shadow: none; }
+.card .nm { font-size: 17px; font-weight: 700; line-height: 1.25; }
+.card .sub { font-size: 11.5px; color: var(--ink-3); margin-top: -4px; }
+.stg { display: inline-block; font-size: 11px; background: var(--accent-soft); padding: 2px 8px; border-radius: 4px; }
+.stg.warn { background: var(--warn-bg); color: var(--warn-ink); }
+.nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+.num { min-width: 0; }
+.num span { display: block; font-size: 10px; color: var(--ink-3); line-height: 1.3; }
+.num b { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.num b.plus { color: var(--ok-ink); }
+.num b.minus { color: var(--bad-ink); }
+.num.rng b { font-size: 13.5px; }
+.num.na b { color: var(--ink-3); font-weight: 500; font-size: 12.5px; }
+.tags { display: flex; gap: 5px; flex-wrap: wrap; }
+.tag { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line-2); font-size: 10.5px; color: var(--ink-2); background: var(--surface); }
+.tag.ok { background: var(--ok-bg); color: var(--ok-ink); border-color: transparent; }
+.tag.bad { background: var(--bad-bg); color: var(--bad-ink); border-color: transparent; }
+.tag.warn { background: var(--warn-bg); color: var(--warn-ink); border-color: transparent; }
+.grade { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 3px; font-size: 10px; font-weight: 700; color: #fff; font-style: normal; vertical-align: 1px; }
+.grade.a { background: var(--g-a); }
+.grade.b { background: var(--g-b); }
+.grade.c { background: var(--g-c); color: #1a1200; }
+.grade.d { background: transparent; color: var(--g-d); border: 1px solid var(--g-d); }
+
+footer { margin-top: 32px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 4px 14px; }
+footer a { color: var(--accent); }
+
+@media (min-width: 720px) {
+  .wrap { padding: 32px 24px 80px; }
+  h1 { font-size: 26px; }
+  .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .vrow { grid-template-columns: 200px minmax(0, 1fr); }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1000px) {
+  .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .card { transition: background .12s; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">서울 재개발 구역 레지스트리 · {{VERSION}} · {{UPDATED}}</div>
+  <h1>{{COUNT}}개 구역, 어디까지 왔나</h1>
+
+  <div class="kpis">{{KPIS}}</div>
+
+  <div class="sec"><span>단계 맵</span><em>점선 = 추정 · 회색 = 서울 외 · △ = 미검증</em></div>
+  <div class="vmap">{{STAGEMAP}}</div>
+
+  <div class="sec"><span>규제</span><em>탭하면 설명</em></div>
+  <div class="pills">{{PILLS}}</div>
+
+  {{GROUPS}}
+
+  <footer>
+    <span>원문 <a href="docs.html">문서 뷰</a> · <a href="https://github.com/{{REPO}}" target="_blank" rel="noopener">GitHub</a></span>
+    <span>분양가 · 권리가액은 감정평가 전 추정치. 안전마진은 확정 수익이 아니다.</span>
+    <span>빌드 {{BUILT}} {{WARNINGS}}</span>
+  </footer>
+</div>
+</body>
+</html>
