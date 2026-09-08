@@ -98,7 +98,7 @@ function parseRegion(file) {
     }
   }
   const est = estIdx < 0 ? null : { heading: lines[estIdx], table: tableAfter(estLines, /^## 추정/, `${file} 추정`), text: estLines.join('\n') };
-  return { no: Number(m[1]), file, headingTitle: m[2].trim(), fields, est, md: text, bullets: bodyLines.filter((l) => /^- /.test(l)).length };
+  return { no: Number(m[1]), file, headingTitle: m[2].trim(), fields, est, md: text, bullets: bodyLines.filter((l) => /^- /.test(l)).length, bodyMd: bodyLines.join('\n').trim(), estMd: estLines.join('\n').trim() };
 }
 const regionFiles = readdirSync(path.join(ROOT, 'regions')).filter((f) => /^\d{2}_.+\.md$/.test(f)).sort();
 if (regionFiles.length === 0) fail('regions/ 에 NN_slug.md 파일이 없다');
@@ -232,13 +232,20 @@ const cards = summary.rows.map((row) => {
   const riskShort = risk ? (risk.tail || firstSentence(risk.value)) : (get(r, '리스크') ? firstSentence(get(r, '리스크').value) : null);
   let updated = registry.updated;
   try { updated = execSync(`git log -1 --format=%cs -- "${r.file}"`, { cwd: ROOT, encoding: 'utf8' }).trim() || updated; } catch { /* git 없음 */ }
+  const areaSrc = strip((get(r, '면적')?.value || '') + ' ' + (loc?.value || ''));
+  const area = (areaSrc.match(/[\d,.]+\s?만?㎡/) || [])[0] || null;
+  const bd = get(r, '권리산정기준일');
+  const baseDate = bd ? (strip(bd.value).match(/\d{4}-\d{2}-\d{2}/) || [])[0] || null : null;
+  const baseDateGrade = bd ? (strip(bd.value).match(/\(([ABCD])[,)\s]/) || [])[1] || null : null;
+  const st = get(r, '단계');
+  const stageDocGrade = st ? (strip(st.value + ' ' + st.sub).match(/(?:^|[\s(])([ABCD])(?= —|\)|,)/) || [])[1] || null : null;
   return {
     no, slug: r.file.replace(/^regions\//, '').replace(/\.md$/, ''), name, nameNote, district: d ? d.name : null, seoul: d ? d.seoul : null,
     method, stage, stageIdx, unverified: /미검증/.test(stage), group,
-    households: households(get(r, '세대수')),
-    price: { invest: strip(row['최종투자금액']), compare: strip(row['비교시세(검증)']), margin: strip(row['안전마진(검증)']), marginNum: num(row['안전마진(검증)']), compareGrade: est?.kind === 'items' ? (est.items.find((i) => /비교시세/.test(i.name))?.grade || null) : priceGrade(get(r, '비교단지') || get(r, '비교시세')), initFund: initFund(r, est) },
+    households: households(get(r, '세대수')), area, baseDate, baseDateGrade, stageDocGrade,
+    price: { buy: strip(row['실거주매매가']), unit: strip(row['조합원분양가']), rights: strip(row['권리가액']), levy: strip(row['추가분담금']), init: strip(row['초기필요자금']), invest: strip(row['최종투자금액']), compare: strip(row['비교시세(검증)']), margin: strip(row['안전마진(검증)']), marginNum: num(row['안전마진(검증)']), compareGrade: est?.kind === 'items' ? (est.items.find((i) => /비교시세/.test(i.name))?.grade || null) : priceGrade(get(r, '비교단지') || get(r, '비교시세')), initFund: initFund(r, est) },
     est, toheo, trust: strip(row['신뢰도']), trustTags: trustTags(r, row),
-    questions: qs.map((q) => q.id), open: qs.filter((q) => !q.resolved).length,
+    questions: qs.map((q) => q.id), openIds: qs.filter((q) => !q.resolved).map((q) => q.id), open: qs.filter((q) => !q.resolved).length,
     riskShort, bullets: r.bullets, bytes: Buffer.byteLength(r.md, 'utf8'), updated,
   };
 });
@@ -263,6 +270,14 @@ const pills = [
 
 // ---------------------------------------------------------------- HTML 조각
 const badge = (g) => (g ? ` <i class="grade ${g.toLowerCase()}">${g}</i>` : '');
+const nn = (c) => String(c.no).padStart(2, '0');
+const kb = (s) => (Buffer.byteLength(s, 'utf8') / 1024).toFixed(1) + 'KB';
+const cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);
+function tagsHtml(c) {
+  const to = c.toheo === '비대상' ? '<span class="tag ok">토허 비대상</span>' : c.toheo === '대상' ? '<span class="tag bad">토허 대상 · 실거주</span>' : `<span class="tag">토허 ${esc(c.toheo || '미확인')}</span>`;
+  const trust = c.trustTags.map((t) => `<span class="tag ${t.cls}">${esc(t.text)}</span>`).join('');
+  return `${to}${trust}<span class="tag">미해결 ${c.open}</span>`;
+}
 const seoulCount = cards.filter((c) => c.seoul !== false).length;
 const openUnique = new Set(questions.filter((q) => !q.resolved).map((q) => q.id)).size;
 const kpis = [
@@ -272,7 +287,7 @@ const kpis = [
   [openUnique, '미해결 질문'],
 ].map(([n, l]) => `<div class="kpi"><b>${n}</b><span>${esc(l)}</span></div>`).join('');
 
-const chip = (c) => `<a class="chip ${c.group}" href="docs.html#r${String(c.no).padStart(2, '0')}">${esc(c.name)}${c.unverified ? ' <small>△</small>' : ''}</a>`;
+const chip = (c) => `<a class="chip ${c.group}" href="regions/${nn(c)}.html">${esc(c.name)}${c.unverified ? ' <small>△</small>' : ''}</a>`;
 const stagemap = STAGES.map(([nm, sub], i) => {
   const here = cards.filter((c) => c.stageIdx === i);
   return `<div class="vrow${here.length ? '' : ' empty'}"><div class="st">${esc(nm)}<small>${i} · ${esc(sub)}</small></div><div class="ch">${here.map(chip).join('')}</div></div>`;
@@ -300,15 +315,13 @@ function card(c) {
     const v = (x) => (num(x) !== null ? x : /미확보|—/.test(x) ? '미확보' : x);
     slots = numSlot('최종투자', v(p.invest), { na: num(p.invest) === null }) + numSlot('비교시세', v(p.compare), { na: num(p.compare) === null }) + numSlot('안전마진', num(p.margin) !== null ? p.margin : '산출 불가', { na: num(p.margin) === null, sign: num(p.margin) });
   }
-  const to = c.toheo === '비대상' ? '<span class="tag ok">토허 비대상</span>' : c.toheo === '대상' ? '<span class="tag bad">토허 대상 · 실거주</span>' : `<span class="tag">토허 ${esc(c.toheo || '미확인')}</span>`;
-  const trust = c.trustTags.map((t) => `<span class="tag ${t.cls}">${esc(t.text)}</span>`).join('');
   const sub = [c.district, c.method, c.households, c.nameNote].filter(Boolean).map(esc).join(' · ');
-  return `<a class="card ${c.group}" href="docs.html#r${String(c.no).padStart(2, '0')}">
+  return `<a class="card ${c.group}" href="regions/${nn(c)}.html">
   <div class="nm">${esc(c.name)}</div>
   <div class="sub">${sub}</div>
   <div><span class="stg${c.unverified ? ' warn' : ''}">${esc(c.stage)}</span></div>
   <div class="nums">${slots}</div>
-  <div class="tags">${to}${trust}<span class="tag">미해결 ${c.open}</span></div>
+  <div class="tags">${tagsHtml(c)}</div>
 </a>`;
 }
 const GROUPS = [
@@ -345,12 +358,95 @@ const panelsHtml = docs.map((d) => {
 }).join('');
 const mdBlocks = docs.flatMap((d) => (d.sections ? d.sections.map((s) => mdBlock(s.id, read(s.file))) : [mdBlock(d.id, read(d.file))])).join('\n');
 
+// ---------------------------------------------------------------- 구역 페이지
+const STEPS7 = ['후보지 · 대상지 선정', '구역지정 · 관리계획 고시', '조합설립인가', '사업시행인가', '관리처분인가', '착공', '입주'];
+const decisionSecs = read('DECISIONS.md').split(/\n(?=## \d+\. )/).filter((s) => /^## \d+\. /.test(s));
+const sourceSecs = (read('20_POLICY_CHECKLIST_SOURCES.md').split(/\n(?=## PART C)/)[1] || '').split(/\n(?=### )/).filter((s) => /^### /.test(s));
+const keysOf = (c) => [norm(c.name), alt(c.name)].filter((k) => k.length >= 3);
+const matchSecs = (secs, c) => secs.filter((s) => { const h = norm(s.split('\n')[0]); return keysOf(c).some((k) => h.includes(k)); });
+
+function bar(price, levy, compare, scale) {
+  if ([price, levy, compare].some((v) => v === null || v === undefined)) return '';
+  const invest = price + levy, margin = compare - invest;
+  const sc = scale || Math.max(invest, compare);
+  const w = (v) => (100 * v / sc).toFixed(1) + '%';
+  return `<div class="bar"><div class="seg p" style="width:${w(price)}"></div><div class="seg l" style="width:${w(levy)}"></div>${margin >= 0 ? `<div class="seg m" style="width:${w(margin)}"></div>` : `<div class="seg neg" style="left:${w(compare)};width:${w(-margin)}"></div>`}<div class="mark" style="left:${w(compare)}"></div></div>`;
+}
+const LEGEND = (extra) => `<div class="legend"><span><i style="background:var(--bar-price)"></i>매매가</span><span><i style="background:var(--bar-levy)"></i>분담금${extra ? ' ' + extra : ''}</span><span><i style="background:var(--bar-plus)"></i>마진 +</span><span><i style="background:var(--bar-minus)"></i>마진 −</span></div>`;
+const signCls = (n) => (n === null ? 'na' : n > 0 ? 'plus' : n < 0 ? 'minus' : '');
+
+function moneyHtml(c) {
+  const p = c.price;
+  const estTail = c.est ? cut(((byNo.get(c.no).est.heading.match(/ — (.+)$/) || [])[1] || ''), 44) : '';
+  if (c.group === 'main') {
+    const rows = `<div class="rows"><span>실거주매매가</span><b>${esc(p.buy)}</b><span>+ 추가분담금</span><b>${esc(p.levy)}</b><span>= 최종투자</span><b>${esc(p.invest)}</b><span>비교시세${badge(p.compareGrade)}</span><b>${esc(p.compare)}</b><span class="big">안전마진</span><b class="big ${signCls(p.marginNum)}">${esc(p.margin)}</b></div>`;
+    return { title: '돈의 흐름 · 84㎡ · 억원', note: '00_PROJECT_BRIEF §3', html: rows + bar(num(p.buy), num(p.levy), num(p.compare)) + LEGEND(`= 분양가 ${esc(p.unit)} − 권리가액 ${esc(p.rights)}`) + '<div class="cav">분양가 · 권리가액은 감정평가 전 추정치.</div>' };
+  }
+  if (c.est?.kind === 'scenario') {
+    const hdr = c.est.header;
+    const col = (names) => hdr.find((h) => names.some((n) => h.startsWith(n)));
+    const cP = col(['매매가']), cL = col(['분담금', '추가분담금']), cC = col(['비교시세']);
+    const baseNum = c.est.base ? num((c.est.base.match(/[\d.]+/) || [])[0]) : null;
+    const rs = c.est.rows.map((v) => ({ name: v.name, price: num(v.cells[cP]), levy: num(v.cells[cL]), cmp: cC ? num(v.cells[cC]) : baseNum, margin: v.margin, m: v.m }));
+    const scale = Math.max(...rs.flatMap((v) => [(v.price || 0) + (v.levy || 0), v.cmp || 0]));
+    const scen = `<div class="scen">${rs.map((v) => `<div class="row"><span>${esc(v.name)}</span>${bar(v.price, v.levy, v.cmp, scale) || '<span></span>'}<span class="v ${signCls(v.m)}">${esc(v.margin)}</span></div>`).join('')}</div>`;
+    const cmpDisp = num(p.compare) !== null ? p.compare : c.est.base || null;
+    const extra = `<div class="rows" style="margin-top:10px">${cmpDisp ? `<span>비교시세${badge(p.compareGrade)}</span><b>${esc(cmpDisp)}</b>` : ''}${p.initFund ? `<span>초기필요자금</span><b>${esc(p.initFund)}</b>` : ''}</div>`;
+    return { title: '돈의 흐름 · 시나리오 · 억원', note: esc(estTail), html: scen + LEGEND('') + extra + '<div class="cav">점추정 인용 금지. 근거 사슬은 아래 원문에.</div>' };
+  }
+  if (c.est?.kind === 'items') {
+    const rows = `<div class="rows">${c.est.items.map((it) => `<span>${esc(it.name)}${badge(it.grade)}</span><b class="${num(it.value) === null ? 'na' : ''}">${esc(it.value)}</b>`).join('')}</div>`;
+    return { title: '수치 · 추정 블록 · 억원', note: esc(estTail), html: rows + '<div class="cav">점추정 인용 금지. 안전마진 산출 불가.</div>' };
+  }
+  const v = (x) => (num(x) !== null ? x : '미확보');
+  const rows = `<div class="rows"><span>최종투자</span><b class="${signCls(num(p.invest))}">${esc(v(p.invest))}</b><span>비교시세</span><b class="${signCls(num(p.compare))}">${esc(v(p.compare))}</b><span class="big">안전마진</span><b class="big ${signCls(num(p.margin))}">${esc(num(p.margin) !== null ? p.margin : '산출 불가')}</b></div>`;
+  return { title: '돈의 흐름 · 억원', note: '', html: rows + '<div class="cav">수치 전량 미확보.</div>' };
+}
+
+function regionPage(c, i) {
+  const r = byNo.get(c.no);
+  const facts = [c.district, c.method, c.households ? `<b>${esc(c.households)}</b>` : null, c.area ? esc(c.area) : null, c.baseDate ? `기준일 <b>${esc(c.baseDate)}</b>${badge(c.baseDateGrade)}` : null, c.nameNote ? esc(c.nameNote) : null]
+    .filter(Boolean).map((x) => `<span>${x}</span>`).join('');
+  const now = c.stageIdx === null ? null : Math.max(c.stageIdx, 1);
+  const stepper = STEPS7.map((s, k) => { const n = k + 1; const cls = now === null ? '' : n < now ? 'done' : n === now ? 'now' : ''; return `<li class="${cls}">${esc(s)}${n === now ? `<small>${esc(c.stage)}</small>` : ''}</li>`; }).join('');
+  const money = moneyHtml(c);
+  const gap = c.toheo === '비대상' ? '가능 · 토허 비대상' : c.toheo === '대상' ? '불가 · 실거주 의무' : '미확인';
+  const judge = `<div class="jr"><span class="k">갭투자</span><b>${esc(gap)}${c.price.initFund ? ` · 갭 ${esc(c.price.initFund)}억` : ''}</b></div>`
+    + `<div class="jr"><span class="k">최대 리스크</span><b>${esc(cut(c.riskShort, 40) || '—')}</b></div>`
+    + `<div class="jr"><span class="k">미해결</span><b>${esc(c.openIds.join(' · ') || '없음')}</b></div>`;
+  const box = (on, label, note) => `<div><div class="box ${on ? 'on' : 'half'}">${on ? '✓' : '△'}</div>${esc(label)}<span>${esc(note)}</span></div>`;
+  const checks = box(!!c.baseDate, '권리산정기준일', c.baseDate ? c.baseDate + (c.baseDateGrade ? ' ' + c.baseDateGrade : '') : '고시일 확인')
+    + box(c.toheo === '비대상' || c.toheo === '대상', '토지거래허가', c.toheo === '비대상' ? '비대상' : c.toheo === '대상' ? '대상 · 실거주' : '미확인')
+    + box(false, '구역계 필지 편입', '매수 필지별 확인')
+    + box(c.stageDocGrade === 'A', '사업단계 문서', c.stageDocGrade ? c.stageDocGrade + '등급' : '고시문 확인');
+  const dec = matchSecs(decisionSecs, c), src = matchSecs(sourceSecs, c);
+  const folds = [
+    { id: 'body', title: `원문 · 불릿 ${c.bullets}개`, size: kb(r.bodyMd), md: r.bodyMd },
+    r.estMd ? { id: 'est', title: '추정 근거 사슬', size: kb(r.estMd), md: r.estMd } : null,
+    dec.length ? { id: 'dec', title: `판단 로그 · ${dec.map((s) => '#' + s.match(/^## (\d+)/)[1]).join(' ')}`, size: 'DECISIONS', md: dec.join('\n\n') } : null,
+    src.length ? { id: 'src', title: '출처', size: '20_POLICY', md: src.join('\n\n') } : null,
+  ].filter(Boolean);
+  const qs = questions.filter((q) => c.questions.includes(q.id));
+  const foldsHtml = folds.map((f) => `<details class="fold" data-md="md-${f.id}"><summary>${esc(f.title)}<span>${esc(f.size)}</span></summary><div class="content"></div></details>`).join('')
+    + (qs.length ? `<details class="fold"><summary>질문 · 미해결 ${c.open} / ${qs.length}<span>OPEN QUESTIONS</span></summary><ul class="qlist">${qs.map((q) => `<li class="${q.resolved ? 'done' : ''}"><b>${esc(q.id)}</b>${esc(q.what)} — ${esc(q.status)}</li>`).join('')}</ul></details>` : '');
+  const prev = cards[i - 1], next = cards[i + 1];
+  return fill(readFileSync(path.join(TPL, 'region.html'), 'utf8'), {
+    ...common, NAME: esc(c.name), SUB: esc([c.district, c.method, c.households].filter(Boolean).join(' · ')), NO: String(c.no), NO2: nn(c), SLUG: c.slug, UPDATED: c.updated, GROUP: c.group,
+    FACTS: facts, TAGS: tagsHtml(c), STAGE: c.stageIdx === null ? `단계 미분류 · ${esc(c.stage)}` : '', STEPPER: stepper,
+    MONEY_TITLE: money.title, MONEY_NOTE: money.note, MONEY: money.html, JUDGE: judge, CHECKS: checks, FOLDS: foldsHtml,
+    PREV: prev ? `<a href="${nn(prev)}.html">‹ ${prev.no} ${esc(prev.name)}</a>` : '<span></span>',
+    NEXT: next ? `<a href="${nn(next)}.html">${next.no} ${esc(next.name)} ›</a>` : '<span></span>',
+    MD_BLOCKS: folds.map((f) => mdBlock(f.id, f.md)).join('\n'),
+  });
+}
+
 // ---------------------------------------------------------------- 쓰기
 rmSync(OUT, { recursive: true, force: true });
-mkdirSync(OUT, { recursive: true });
+mkdirSync(path.join(OUT, 'regions'), { recursive: true });
 const common = { VERSION: registry.version, UPDATED: registry.updated, COUNT: String(cards.length), BUILT: built, REPO, WARNINGS: warnings.length ? `경고 ${warnings.length}건 (빌드 로그)` : '' };
 writeFileSync(path.join(OUT, 'index.html'), fill(readFileSync(path.join(TPL, 'index.html'), 'utf8'), { ...common, KPIS: kpis, STAGEMAP: stagemap, PILLS: pillsHtml, GROUPS: groupsHtml }));
 writeFileSync(path.join(OUT, 'docs.html'), fill(readFileSync(path.join(TPL, 'docs.html'), 'utf8'), { ...common, TABS: tabsHtml, PANELS: panelsHtml, MD_BLOCKS: mdBlocks }));
+cards.forEach((c, i) => writeFileSync(path.join(OUT, 'regions', nn(c) + '.html'), regionPage(c, i)));
 writeFileSync(path.join(OUT, 'data.json'), JSON.stringify({ registry, built, warnings, stages: STAGES.map((s) => s[0]), pills, cards, questions }, null, 2));
 if (existsSync(path.join(ROOT, 'site', 'static'))) for (const f of readdirSync(path.join(ROOT, 'site', 'static'))) writeFileSync(path.join(OUT, f), readFileSync(path.join(ROOT, 'site', 'static', f)));
 
