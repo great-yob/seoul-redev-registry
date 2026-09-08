@@ -21,3 +21,6 @@ scratch/
 
 # Pages 빌드 산출물 — CI에서만 생성, 커밋하지 않는다
 _site/
+
+__pycache__/
+*.pyc
