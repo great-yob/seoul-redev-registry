@@ -81,8 +81,12 @@ function parseRegion(file) {
   const m = lines[0].match(/^# (\d+)\. (.+)$/);
   if (!m) fail(`${file}: 첫 줄이 '# N. 이름' 형식이 아니다: ${lines[0]}`);
   const estIdx = lines.findIndex((l) => /^## 추정/.test(l));
-  const bodyLines = estIdx < 0 ? lines.slice(1) : lines.slice(1, estIdx);
-  const estLines = estIdx < 0 ? [] : lines.slice(estIdx);
+  const listIdx = lines.findIndex((l) => /^## 매물/.test(l));
+  const secEnd = (from) => { const nx = lines.findIndex((l, k) => k > from && /^## /.test(l)); return nx < 0 ? lines.length : nx; };
+  const firstSec = [estIdx, listIdx].filter((k) => k >= 0).sort((a, b) => a - b)[0];
+  const bodyLines = firstSec === undefined ? lines.slice(1) : lines.slice(1, firstSec);
+  const estLines = estIdx < 0 ? [] : lines.slice(estIdx, secEnd(estIdx));
+  const listLines = listIdx < 0 ? [] : lines.slice(listIdx, secEnd(listIdx));
   const fields = {};
   let cur = null;
   for (const l of bodyLines) {
@@ -98,7 +102,8 @@ function parseRegion(file) {
     }
   }
   const est = estIdx < 0 ? null : { heading: lines[estIdx], table: tableAfter(estLines, /^## 추정/, `${file} 추정`), text: estLines.join('\n') };
-  return { no: Number(m[1]), file, headingTitle: m[2].trim(), fields, est, md: text, bullets: bodyLines.filter((l) => /^- /.test(l)).length, bodyMd: bodyLines.join('\n').trim(), estMd: estLines.join('\n').trim() };
+  const list = listIdx < 0 ? null : { heading: lines[listIdx], table: tableAfter(listLines, /^## 매물/, `${file} 매물`), note: listLines.slice(1).find((l) => l.trim() && !l.trim().startsWith('|')) || '' };
+  return { no: Number(m[1]), file, headingTitle: m[2].trim(), fields, est, list, md: text, bullets: bodyLines.filter((l) => /^- /.test(l)).length, bodyMd: bodyLines.join('\n').trim(), estMd: estLines.join('\n').trim(), listMd: listLines.join('\n').trim() };
 }
 const regionFiles = readdirSync(path.join(ROOT, 'regions')).filter((f) => /^\d{2}_.+\.md$/.test(f)).sort();
 if (regionFiles.length === 0) fail('regions/ 에 NN_slug.md 파일이 없다');
@@ -166,6 +171,20 @@ function initFund(r, est) {
     if (it) return it.value.replace(/억$/, '');
   }
   return null;
+}
+// ## 매물 절 — 참고(D). 필수 열 물건·점수·링크. 노트 문단의 첫 링크는 출처, 첫 날짜는 수집일.
+const mdLinks = (s) => [...String(s ?? '').matchAll(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g)].map((m) => ({ label: m[1], url: m[2] }));
+function parseListings(r) {
+  if (!r.list) return null;
+  const t = r.list.table;
+  if (!t) { warn(`${r.file}: ## 매물 아래 표가 없다`); return null; }
+  for (const c of ['물건', '점수', '링크']) if (!t.header.includes(c)) { warn(`${r.file}: 매물 표에 '${c}' 열이 없다`); return null; }
+  const items = t.rows.map((row) => ({
+    rank: num(row['순위']), name: strip(row['물건']), score: num(row['점수']), price: strip(row['호가']), type: strip(row['유형']), area: strip(row['면적']), floor: strip(row['층']), links: mdLinks(row['링크']),
+  })).filter((it) => it.name);
+  for (const it of items) if (it.score === null) warn(`${r.file}: 매물 '${it.name}' 점수가 숫자가 아니다`);
+  const note = strip(r.list.note);
+  return { note: note.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '$1'), noteLinks: mdLinks(note), date: (note.match(/\d{4}-\d{2}-\d{2}/) || [])[0] || null, count: items.length, items };
 }
 function trustTags(r, row) {
   const h = r.est?.heading || '';
@@ -246,7 +265,7 @@ const cards = summary.rows.map((row) => {
     price: { buy: strip(row['실거주매매가']), unit: strip(row['조합원분양가']), rights: strip(row['권리가액']), levy: strip(row['추가분담금']), init: strip(row['초기필요자금']), invest: strip(row['최종투자금액']), compare: strip(row['비교시세(검증)']), margin: strip(row['안전마진(검증)']), marginNum: num(row['안전마진(검증)']), compareGrade: est?.kind === 'items' ? (est.items.find((i) => /비교시세/.test(i.name))?.grade || null) : priceGrade(get(r, '비교단지') || get(r, '비교시세')), initFund: initFund(r, est) },
     est, toheo, trust: strip(row['신뢰도']), trustTags: trustTags(r, row),
     questions: qs.map((q) => q.id), openIds: qs.filter((q) => !q.resolved).map((q) => q.id), open: qs.filter((q) => !q.resolved).length,
-    riskShort, bullets: r.bullets, bytes: Buffer.byteLength(r.md, 'utf8'), updated,
+    riskShort, listings: parseListings(r), bullets: r.bullets, bytes: Buffer.byteLength(r.md, 'utf8'), updated,
   };
 });
 for (const q of questions) {
@@ -419,10 +438,18 @@ function regionPage(c, i) {
     + box(c.toheo === '비대상' || c.toheo === '대상', '토지거래허가', c.toheo === '비대상' ? '비대상' : c.toheo === '대상' ? '대상 · 실거주' : '미확인')
     + box(false, '구역계 필지 편입', '매수 필지별 확인')
     + box(c.stageDocGrade === 'A', '사업단계 문서', c.stageDocGrade ? c.stageDocGrade + '등급' : '고시문 확인');
+  const ls = c.listings;
+  const listingsHtml = ls && ls.items.length ? (() => {
+    const top = ls.items.slice(0, 3);
+    const li = top.map((it) => `<li><span class="rk">${it.rank ?? ''}</span><div class="nm">${esc(it.name)}<small>${esc([it.price, it.type, it.floor && it.floor !== '—' ? (/층/.test(it.floor) ? it.floor : it.floor + '층') : ''].filter(Boolean).join(' · '))}</small></div><div class="sc"><b>${it.score ?? '—'}</b><i style="--w:${Math.max(0, Math.min(100, it.score ?? 0))}%"></i></div><div class="lk">${it.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a>`).join('')}</div></li>`).join('');
+    const src = ls.noteLinks[0];
+    return `<div class="sec"><span>매수 후보 · 참고 <i class="grade d">D</i></span><em>${src ? `<a href="${esc(src.url)}" target="_blank" rel="noopener">${esc(src.label)}</a> · ` : ''}${esc(ls.date || '')} · 호가 · 상위 ${top.length} / ${ls.count}</em></div><ol class="ls">${li}</ol><div class="cav">${esc(cut(ls.note, 140))}</div>`;
+  })() : '';
   const dec = matchSecs(decisionSecs, c), src = matchSecs(sourceSecs, c);
   const folds = [
     { id: 'body', title: `원문 · 불릿 ${c.bullets}개`, size: kb(r.bodyMd), md: r.bodyMd },
     r.estMd ? { id: 'est', title: '추정 근거 사슬', size: kb(r.estMd), md: r.estMd } : null,
+    r.listMd ? { id: 'list', title: `매물 전체 ${ls ? ls.count : ''}건 · 점수 근거`, size: kb(r.listMd), md: r.listMd } : null,
     dec.length ? { id: 'dec', title: `판단 로그 · ${dec.map((s) => '#' + s.match(/^## (\d+)/)[1]).join(' ')}`, size: 'DECISIONS', md: dec.join('\n\n') } : null,
     src.length ? { id: 'src', title: '출처', size: '20_POLICY', md: src.join('\n\n') } : null,
   ].filter(Boolean);
@@ -433,7 +460,7 @@ function regionPage(c, i) {
   return fill(readFileSync(path.join(TPL, 'region.html'), 'utf8'), {
     ...common, NAME: esc(c.name), SUB: esc([c.district, c.method, c.households].filter(Boolean).join(' · ')), NO: String(c.no), NO2: nn(c), SLUG: c.slug, UPDATED: c.updated, GROUP: c.group,
     FACTS: facts, TAGS: tagsHtml(c), STAGE: c.stageIdx === null ? `단계 미분류 · ${esc(c.stage)}` : '', STEPPER: stepper,
-    MONEY_TITLE: money.title, MONEY_NOTE: money.note, MONEY: money.html, JUDGE: judge, CHECKS: checks, FOLDS: foldsHtml,
+    MONEY_TITLE: money.title, MONEY_NOTE: money.note, MONEY: money.html, JUDGE: judge, LISTINGS: listingsHtml, CHECKS: checks, FOLDS: foldsHtml,
     PREV: prev ? `<a href="${nn(prev)}.html">‹ ${prev.no} ${esc(prev.name)}</a>` : '<span></span>',
     NEXT: next ? `<a href="${nn(next)}.html">${next.no} ${esc(next.name)} ›</a>` : '<span></span>',
     MD_BLOCKS: folds.map((f) => mdBlock(f.id, f.md)).join('\n'),
