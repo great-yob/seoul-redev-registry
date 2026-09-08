@@ -403,7 +403,7 @@ def main():
         lines.append(f'- {r["title"]}: {r["prev"] if r["prev"] is not None else "—"} → {r["now"]}건 (중복 제거 {r["dedup"]}건 중 {r["dedup"] - r["now"]}건 범위 밖, 저가 예외 {r["exc"]}건) · 상위 {r["top"] or "없음"}')
     lines += [f'- 예산 필터: 호가 {pmin:.2f}억 이상 {pmax:.2f}억 이하 + 하한 미만 점수 예외 {total_exc}건 — 전 구역 {total_dedup}건 중 {total_dedup - total}건 제외',
               f'- 출처: 재개발닷컴 jaegebal.com/develops/{{id}}/asks ({today} 자동수집)', '- 등급: D (호가·매물, 계산 근거 아님)',
-              '- 근거: 자동수집 tools/collect_listings.py · 채점 DECISIONS #19 · 예산 필터 DECISIONS #19 4차']
+              '- 근거: 자동수집 tools/collect_listings.py · 채점 DECISIONS #19 · 예산 필터 DECISIONS #19 4·5차']
     if errors:
         lines += ['', '수집 실패:'] + [f'- {e}' for e in errors]
     summary = '\n'.join(lines) + '\n'
