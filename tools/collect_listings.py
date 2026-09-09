@@ -40,10 +40,12 @@ KST = dt.timezone(dt.timedelta(hours=9))
 W = dict(unit=30, share=25, floor=15, date=15, entry=15)
 LAND_TYPES = ('단독', '토지', '다가구')
 
-# 예산 필터 (사용자 2026-09-08 결정, DECISIONS #19 4·5차) — 실거주 기준 초기투자금(대출 포함) 상한 8억, 이상 구간 6~7억.
+# 예산 필터 (사용자 2026-09-08 결정, DECISIONS #19 4·5차) — 실거주 기준 초기투자금(대출 포함) 상한 8억.
+# 하한은 2026-09-09 사용자 결정으로 6.0 → 5.0 (DECISIONS #19 6차) — 대조2처럼 구역 전체가 5억대 아래인 초기 구역이
+# 통째로 0건이 되어 비교 자체가 불가능해졌기 때문이다.
 # 호가 그대로 판정한다(취득세·중개비 별도, 빌라 약 4~5%). 양끝 포함이며, 하한 미만은 점수가 예산 통과분 최고점 이상일 때만 예외로 싣는다.
 # 주 1회 자동 갱신도 이 값으로 돈다. CLI 인자로만 덮어쓴다.
-PRICE_MIN, PRICE_MAX = 6.0, 8.0   # 억. PRICE_MIN 이상 ~ PRICE_MAX 이하(양끝 포함)
+PRICE_MIN, PRICE_MAX = 5.0, 8.0   # 억. PRICE_MIN 이상 ~ PRICE_MAX 이하(양끝 포함)
 
 # 구역 설정. basedate 는 레지스트리 확정값(없으면 None → 재개발닷컴 상세의 right_basedate 를 채점에만 사용).
 # anchor 는 노트에 찍는 기준 앵커 문구(레지스트리 요약). 구역 파일의 사실이 바뀌면 여기도 맞춘다.
@@ -53,8 +55,9 @@ ZONES = [
     dict(name='cheonho338', did='1738', title='천호동 338', file='03_cheonho338', basedate='2024-05-23', anchor='구역 내 실거래 4건 3.99~6.23억(2026, A)'),
     dict(name='jangwi15', did='2327', title='장위15', file='04_jangwi15', basedate=None, anchor='233-42 실거래 10.00억(2026-06, 대지권 61.32㎡, A)'),
     dict(name='sangdo16', did='3691', title='상도16', file='05_sangdo16', basedate='2025-05-23', anchor='구역 내 실거래 중앙값 4.60억 · 대지권27㎡+ 중앙값 5.70억(A)'),
-    dict(name='galhyeon510-1', did='4640', title='갈현동 510-1', file='06_galhyeon510-1', basedate='2026-07-01', anchor='구역계 미확정 — 502~529번지 근사 집계(추정 블록)'),
+    dict(name='galhyeon510-1', did='4640', title='갈현동 510-1', file='06_galhyeon510-1', basedate='2026-07-01', anchor='폴리곤 대조 구역 내 78건 중앙값 2.51억(2026, A) · 실거래/공시 배율 중앙 1.92(n=69, A)'),
     dict(name='sutaek2', did='4074', title='수택2', file='07_sutaek2', basedate='2023-07-13', anchor='구역계 근사 98건 중앙값 3.80억(2026, A)'),
+    dict(name='daejo212', did='4577', title='대조동 212', file='08_daejo212', basedate=None, anchor='폴리곤 대조 구역 내 52건 중앙값 3.23억(2026, A) · 권리산정기준일 미지정'),
 ]
 
 session = requests.Session()
