@@ -17,18 +17,18 @@
   <div class="sec"><span>단계</span><em>{{STAGE}}</em></div>
   <ol class="vs">{{STEPPER}}</ol>
 
-  <div class="sec"><span>{{MONEY_TITLE}}</span><em>{{MONEY_NOTE}}</em></div>
-  <div class="pm {{GROUP}}">{{MONEY}}</div>
+  <div class="sec"><span>돈의 흐름 · 84㎡ · 억원</span><em>실거주 · 무주택</em></div>
+  <div class="pm {{STYLE}}">{{MONEY}}</div>
 
   <div class="sec"><span>지금 판단</span></div>
   <div class="jbox">{{JUDGE}}</div>
 
   {{LISTINGS}}
 
-  <div class="sec"><span>매수 전 확인 4종</span><em>00_PROJECT_BRIEF §5</em></div>
+  <div class="sec"><span>매수 전 확인 4종</span></div>
   <div class="ck">{{CHECKS}}</div>
 
-  <div class="sec"><span>근거</span><em>열기 전엔 렌더하지 않음</em></div>
+  <div class="sec"><span>근거</span><em>접힘 · 열면 표로</em></div>
   {{FOLDS}}
 
   <nav class="pn">{{PREV}}<span></span>{{NEXT}}</nav>
@@ -36,13 +36,12 @@
   <footer>
     <span>원문 <a href="../docs.html#r{{NO2}}">문서 뷰</a> · <a href="https://github.com/{{REPO}}/blob/main/regions/{{SLUG}}.md" target="_blank" rel="noopener">GitHub</a></span>
     <span>분양가 · 권리가액은 감정평가 전 추정치. 안전마진은 확정 수익이 아니다.</span>
-    <span>빌드 {{BUILT}}</span>
   </footer>
 </div>
 {{MD_BLOCKS}}
 <script>
 (function () {
-  // 네이버 부동산은 PC(new.land)와 모바일(m.land) URL 형식이 다르다. 모바일 UA면 data-m 링크로 바꾼다
+  // 네이버 부동산은 PC(new.land)와 모바일(fin.land) URL 형식이 다르다. 모바일 UA면 data-m 링크로 바꾼다
   if (/iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent)) {
     document.querySelectorAll('a[data-m]').forEach(function (a) { a.href = a.getAttribute('data-m'); });
   }
@@ -56,17 +55,22 @@
     });
     return loading;
   }
-  document.querySelectorAll('details.fold[data-md]').forEach(function (d) {
+  // 접힘 안의 [data-md] 는 열릴 때만 렌더한다 — "더 보기" · 근거 사슬 전체
+  function render(el) {
+    if (el.dataset.done) return;
+    el.dataset.done = '1';
+    var src = document.getElementById(el.dataset.md);
+    if (!src) return;
+    ensureMarked().then(function () {
+      el.innerHTML = marked.parse(src.textContent, { gfm: true, breaks: false });
+    }).catch(function () {
+      el.innerHTML = '<pre style="white-space:pre-wrap">' + src.textContent.replace(/</g, '&lt;') + '</pre>';
+    });
+  }
+  document.querySelectorAll('details').forEach(function (d) {
     d.addEventListener('toggle', function () {
-      if (!d.open || d.dataset.done) return;
-      var src = document.getElementById(d.dataset.md), el = d.querySelector('.content');
-      if (!src || !el) return;
-      ensureMarked().then(function () {
-        el.innerHTML = marked.parse(src.textContent, { gfm: true, breaks: false });
-      }).catch(function () {
-        el.innerHTML = '<pre style="white-space:pre-wrap">' + src.textContent.replace(/</g, '&lt;') + '</pre>';
-      });
-      d.dataset.done = '1';
+      if (!d.open) return;
+      d.querySelectorAll(':scope > [data-md], :scope > * > [data-md]').forEach(render);
     });
   });
 })();

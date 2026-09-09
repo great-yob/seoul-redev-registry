@@ -11,21 +11,19 @@
 <div class="wrap">
   <div class="eyebrow">서울 재개발 구역 레지스트리 · {{VERSION}} · {{UPDATED}}</div>
   <h1>{{COUNT}}개 구역, 어디까지 왔나</h1>
+  <div class="lead">{{LEAD}}</div>
 
-  <div class="kpis">{{KPIS}}</div>
-
-  <div class="sec"><span>단계 맵</span><em>점선 = 추정 · 회색 = 서울 외 · △ = 미검증</em></div>
+  <div class="sec"><span>단계 맵</span><em>점선 = 산출 불가 · 회색 = 서울 외 · △ = 미검증</em></div>
   <div class="vmap">{{STAGEMAP}}</div>
 
-  <div class="sec"><span>규제</span><em>탭하면 설명</em></div>
+  <div class="sec"><span>규제 · 산식 입력</span><em>탭하면 설명</em></div>
   <div class="pills">{{PILLS}}</div>
 
   {{GROUPS}}
 
   <footer>
     <span>원문 <a href="docs.html">문서 뷰</a> · <a href="https://github.com/{{REPO}}" target="_blank" rel="noopener">GitHub</a></span>
-    <span>분양가 · 권리가액은 감정평가 전 추정치. 안전마진은 확정 수익이 아니다.</span>
-    <span>빌드 {{BUILT}} {{WARNINGS}}</span>
+    <span>초기 현금은 실거주 · 무주택 · DSR 미반영. 분양가 · 권리가액은 감정평가 전 추정치. 안전마진은 확정 수익이 아니다.</span>
   </footer>
 </div>
 </body>
