@@ -450,7 +450,16 @@ function regionPage(c, i) {
       const mob = links.find((l) => /모바일/.test(l.label));
       return links.filter((l) => l !== mob).map((l) => `<a href="${esc(l.url)}"${mob && /네이버/.test(l.label) ? ` data-m="${esc(mob.url)}"` : ''} target="_blank" rel="noopener">${esc(l.label)}</a>`).join('');
     };
-    const li = top.map((it) => `<li><span class="rk">${it.rank ?? ''}</span><div class="nm">${esc(it.name)}<small>${esc([it.price, it.type, it.floor && it.floor !== '—' ? (/층/.test(it.floor) ? it.floor : it.floor + '층') : ''].filter(Boolean).join(' · '))}</small></div><div class="sc"><b>${it.score ?? '—'}</b><i style="--w:${Math.max(0, Math.min(100, it.score ?? 0))}%"></i></div><div class="lk">${linkHtml(it.links)}</div></li>`).join('');
+    // 점수 게이지 — 반원 도넛. 중심 (32,32) 반지름 26 의 위쪽 반원이고, 호 길이 π×26 을 stroke-dasharray 로 잘라 점수만큼 채운다
+    const ARC = 'M6 32A26 26 0 0 1 58 32', LEN = Math.PI * 26;
+    const gauge = (s) => {
+      const v = s === null || s === undefined ? null : Math.max(0, Math.min(100, s));
+      return `<svg class="gg" viewBox="0 0 64 38" role="img" aria-label="매력도 점수 ${v ?? '미상'} / 100">`
+        + `<path class="tr" d="${ARC}"/>`
+        + (v === null ? '' : `<path class="vl" d="${ARC}" stroke-dasharray="${(LEN * v / 100).toFixed(2)} ${LEN.toFixed(2)}"/>`)
+        + `<text x="32" y="32">${v ?? '—'}</text></svg>`;
+    };
+    const li = top.map((it) => `<li><span class="rk">${it.rank ?? ''}</span><div class="nm">${esc(it.name)}<small>${esc([it.price, it.type, it.floor && it.floor !== '—' ? (/층/.test(it.floor) ? it.floor : it.floor + '층') : ''].filter(Boolean).join(' · '))}</small></div><div class="sc">${gauge(it.score)}</div><div class="lk">${linkHtml(it.links)}</div></li>`).join('');
     return head + `<ol class="ls">${li}</ol><div class="cav">${esc(cut(ls.note, 140))}</div>`;
   })() : '';
   const dec = matchSecs(decisionSecs, c), src = matchSecs(sourceSecs, c);
