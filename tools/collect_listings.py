@@ -50,13 +50,11 @@ PRICE_MIN, PRICE_MAX = 6.0, 8.0   # 억. PRICE_MIN 이상 ~ PRICE_MAX 이하(양
 ZONES = [
     dict(name='dapsimni489', did='2153', title='답십리동 489', file='01_dapsimni489', basedate='2023-12-07', anchor='구역 내 실거래 없음(Q8) · 개별공시지가 중앙값 407만원/㎡(A)'),
     dict(name='jayang655', did='4641', title='자양1동 655', file='02_jayang655', basedate=None, anchor='구역 내 실거래 3건 4.00~7.00억(2026, A)'),
-    dict(name='dunchon77-41', did='2494', title='둔촌동 77-41', file='03_dunchon77-41', basedate=None, anchor='구역 내 실거래 없음(2026 연립다세대 0건)'),
-    dict(name='cheonho338', did='1738', title='천호동 338', file='04_cheonho338', basedate='2024-05-23', anchor='구역 내 실거래 4건 3.99~6.23억(2026, A)'),
-    dict(name='geumho23', did='2453', title='금호23', file='05_geumho23', basedate=None, anchor='구역 내 실거래 없음(단독다가구 지번 마스킹)'),
-    dict(name='jangwi15', did='2327', title='장위15', file='06_jangwi15', basedate=None, anchor='233-42 실거래 10.00억(2026-06, 대지권 61.32㎡, A)'),
-    dict(name='sangdo16', did='3691', title='상도16', file='07_sangdo16', basedate='2025-05-23', anchor='구역 내 실거래 중앙값 4.60억 · 대지권27㎡+ 중앙값 5.70억(A)'),
-    dict(name='galhyeon510-1', did='4640', title='갈현동 510-1', file='08_galhyeon510-1', basedate='2026-07-01', anchor='구역계 미확정 — 502~529번지 근사 집계(추정 블록)'),
-    dict(name='sutaek2', did='4074', title='수택2', file='09_sutaek2', basedate='2023-07-13', anchor='구역계 근사 98건 중앙값 3.80억(2026, A)'),
+    dict(name='cheonho338', did='1738', title='천호동 338', file='03_cheonho338', basedate='2024-05-23', anchor='구역 내 실거래 4건 3.99~6.23억(2026, A)'),
+    dict(name='jangwi15', did='2327', title='장위15', file='04_jangwi15', basedate=None, anchor='233-42 실거래 10.00억(2026-06, 대지권 61.32㎡, A)'),
+    dict(name='sangdo16', did='3691', title='상도16', file='05_sangdo16', basedate='2025-05-23', anchor='구역 내 실거래 중앙값 4.60억 · 대지권27㎡+ 중앙값 5.70억(A)'),
+    dict(name='galhyeon510-1', did='4640', title='갈현동 510-1', file='06_galhyeon510-1', basedate='2026-07-01', anchor='구역계 미확정 — 502~529번지 근사 집계(추정 블록)'),
+    dict(name='sutaek2', did='4074', title='수택2', file='07_sutaek2', basedate='2023-07-13', anchor='구역계 근사 98건 중앙값 3.80억(2026, A)'),
 ]
 
 session = requests.Session()
