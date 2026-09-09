@@ -32,7 +32,7 @@ jobs:
       - name: Install deps
         run: pip install requests
 
-      - name: Collect (재개발닷컴 → regions/*.md ## 매물 절 교체)
+      - name: Collect (재개발닷컴 → regions/*.md ## 매물 절 교체 + data/listings 회차 스냅샷)
         run: python tools/collect_listings.py --summary /tmp/summary.md
 
       - name: Setup Node
@@ -47,13 +47,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if git diff --quiet -- regions; then
-            echo "매물 절 변화 없음 — 커밋하지 않는다"
+          # data/ 는 신규 파일이라 git diff 에 안 잡힌다 — 미추적까지 보는 git status 로 판정
+          if git diff --quiet -- regions && [ -z "$(git status --porcelain -- data)" ]; then
+            echo "매물 절·회차 스냅샷 모두 변화 없음 — 커밋하지 않는다"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add regions
+          git add regions data
           git commit -F /tmp/summary.md
           git push origin HEAD:main
           # GITHUB_TOKEN 으로 push 한 커밋은 다른 워크플로를 자동으로 깨우지 않는다 → Pages 배포를 직접 호출
