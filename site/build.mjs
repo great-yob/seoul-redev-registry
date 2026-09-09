@@ -380,7 +380,12 @@ const cards = summary.rows.map((row) => {
   const style = d && !d.seoul ? 'out' : marginNum === null ? 'est' : 'main';
   const risk = get(r, '최대 리스크') || get(r, '리스크');
   const riskShort = risk ? (risk.tail || firstSentence(risk.value, 40)) : null;
-  const riskLine = risk ? (risk.tail ? `${risk.tail} · ${firstSentence(risk.value, 70)}` : firstSentence(risk.value, 80)) : null;
+  // 판단 박스는 말줄임을 쓰지 않는다 — 앞머리(tail) + 첫 문장은 통째로 보이고, 나머지는 그 자리 '더 보기'로 연다
+  const riskBody = risk ? strip(risk.value + ' ' + risk.sub).replace(/\s+/g, ' ').trim() : null;
+  const riskTail = riskBody ? riskBody.slice(firstSentence(riskBody, 9999).length) : null;   // firstSentence는 마침표를 구분자로 먹는다 — 앞뒤로 나눠 붙인다
+  const riskFirst = riskBody ? firstSentence(riskBody, 9999) + (/^\./.test(riskTail) ? '.' : '') : null;
+  const riskRest = riskTail ? riskTail.replace(/^[.\s]+/, '').trim() || null : null;
+  const riskLine = risk ? [risk.tail || null, riskFirst].filter(Boolean).join(' · ') : null;
   let updated = registry.updated;
   try { updated = execSync(`git log -1 --format=%cs -- "${r.file}"`, { cwd: ROOT, encoding: 'utf8' }).trim() || updated; } catch { /* git 없음 */ }
   const areaSrc = strip((get(r, '면적')?.value || '') + ' ' + (loc?.value || ''));
@@ -405,7 +410,8 @@ const cards = summary.rows.map((row) => {
     households: households(get(r, '세대수')), area, baseDate, baseDateGrade, stageDocGrade, contractor, moveIn: moveIn(r), compareInfo: compareInfo(r),
     price, est, chain: estChain(r), toheo, trust: strip(row['신뢰도']), basis,
     questions: qs.map((q) => q.id), openIds: qs.filter((q) => !q.resolved).map((q) => q.id), open: qs.filter((q) => !q.resolved).length,
-    riskShort, riskLine, listings: parseListings(r), bullets: r.bullets, bytes: Buffer.byteLength(r.md, 'utf8'), updated,
+    riskShort, riskLine, riskLead: risk ? risk.tail || null : null, riskFirst, riskRest,
+    listings: parseListings(r), bullets: r.bullets, bytes: Buffer.byteLength(r.md, 'utf8'), updated,
   };
 });
 for (const q of questions) {
@@ -523,12 +529,15 @@ function bar(price, levy, compare, scale) {
 const LEGEND = `<div class="legend"><span><i style="background:var(--bar-price)"></i>매매가</span><span><i style="background:var(--bar-levy)"></i>분담금</span><span><i style="background:var(--bar-plus)"></i>마진 +</span><span><i style="background:var(--bar-minus)"></i>마진 −</span><span><i style="background:var(--ink)"></i>비교시세</span></div>`;
 const signCls = (n) => (n === null ? 'na' : n > 0 ? 'plus' : n < 0 ? 'minus' : '');
 
-// 돈의 흐름 — 위: 초기 현금(실거주), 아래: 최종투자·안전마진. 등급 배지는 행마다.
+// 돈의 흐름 — 위: 결과 타일 3개(초기 현금 · 최종투자 · 안전마진), 아래: 단계별 계산 내역.
+// 타일이 결론이고 계산 내역은 감사 흔적이다. 9줄을 죽 나열하면 한눈에 안 읽힌다.
 function moneyHtml(c) {
   const p = c.price, g = c.basis ? c.basis.grade : null, gb = badge(g, c.basis?.raw);
-  const row = (label, value, opt = {}) => `<span class="${opt.ref ? 'ref' : ''}${opt.big ? ' big' : ''}">${label}</span><b class="${opt.cls || ''}${opt.big ? ' big' : ''}">${value}</b>`;
+  const row = (label, value, opt = {}) => `<span class="${opt.ref ? 'ref' : ''}">${label}</span><b class="${opt.cls || ''}">${value}</b>`;
+  const grp = (t) => `<span class="gl">${t}</span>`;
   const rows = [];
   const buyRg = rangeOf(p.buy);
+  rows.push(grp('매수 시점'));
   if (buyRg) {
     rows.push(row(`실거주매매가${gb}`, fmtRange(buyRg)));
     if (p.cash) {
@@ -539,6 +548,7 @@ function moneyHtml(c) {
   } else rows.push(row('실거주매매가', '미확보', { cls: 'na' }));
   if (p.gapFund) rows.push(row('갭 기준 초기자금 <small>참고 · 전세 낀 매수</small>', esc(p.gapFund), { ref: true }));
   const investNum = num(p.invest);
+  rows.push(grp('사업 진행'));
   if (investNum !== null) {
     rows.push(row(`+ 추가분담금 <small>분양가 ${esc(fmtCell(p.unit))}${gb} − 권리가액 ${esc(fmtCell(p.rights))}${gb}${c.basis?.placeholder ? ' 자리표시자' : ''}</small>`, fmtCell(p.levy)));
     rows.push(row('= 최종투자', fmtCell(p.invest), { cls: 'sum' }));
@@ -546,15 +556,24 @@ function moneyHtml(c) {
   else rows.push(row('최종투자', '미확보', { cls: 'na' }));
   const ci = c.compareInfo;
   const ciText = ci ? ` <small>${esc([ci.name, ci.year, ci.n ? ci.n + '건' : null].filter(Boolean).join(' · '))}</small>` : '';
+  rows.push(grp('준공 후'));
   if (num(p.compare) !== null) rows.push(row(`비교시세${badge(p.compareGrade)}${ciText}`, fmtCell(p.compare)));
   else rows.push(row('비교시세', '미확보', { cls: 'na' }));
   const rng = c.est?.kind === 'scenario' ? ` <small>레인지 ${esc(c.est.range)}</small>` : '';
-  if (p.marginNum !== null) rows.push(row(`안전마진${gb}${rng}`, signed(p.marginNum), { big: true, cls: gradeCls(g) || signCls(p.marginNum) }));
-  else if (/~/.test(p.margin)) rows.push(row(`안전마진${gb}`, esc(p.margin), { big: true, cls: 'c' }));
-  else rows.push(row('안전마진', '산출 불가', { big: true, cls: 'na' }));
+  const marginCls = p.marginNum !== null ? (gradeCls(g) || signCls(p.marginNum)) : /~/.test(p.margin) ? 'c' : 'na';
+  if (p.marginNum !== null) rows.push(row(`= 안전마진${gb}${rng}`, signed(p.marginNum), { cls: 'sum ' + marginCls }));
+  else if (/~/.test(p.margin)) rows.push(row(`= 안전마진${gb}${rng}`, esc(p.margin), { cls: 'sum c' }));
+  else rows.push(row('안전마진', '산출 불가', { cls: 'na' }));
   const chart = investNum !== null && num(p.compare) !== null && buyRg && buyRg[0] === buyRg[1] ? bar(buyRg[0], num(p.levy), num(p.compare)) + LEGEND : '';
   const cav = [investNum !== null ? '분양가 · 권리가액은 감정평가 전 추정치.' : '조합원분양가 · 권리가액 미확보 — 안전마진 산출 불가.', p.cash ? 'DSR 미반영 · 대출은 매매가 기준 근사.' : null, c.est?.kind === 'scenario' ? '점추정 인용 금지.' : null].filter(Boolean).join(' ');
-  return `<div class="rows">${rows.join('')}</div>${chart}<div class="cav">${cav}</div>`;
+  // 결과 타일 — 계산 내역을 읽지 않아도 세 숫자만으로 판단이 서게 한다. 값이 없으면 '—'
+  const tile = (label, value, sub, cls) => `<div><span>${label}</span><b class="${value === null ? 'na' : cls || ''}${value !== null && !/^[+−-]?\d+(\.\d+)?$/.test(value) ? ' rg' : ''}">${value === null ? '—' : esc(value)}</b><em>${sub}</em></div>`;
+  const investV = investNum !== null ? fmtCell(p.invest) : /~/.test(p.invest) ? strip(p.invest) : null;
+  const marginV = p.marginNum !== null ? signed(p.marginNum) : /~/.test(p.margin) ? strip(p.margin) : null;
+  const kpi = tile('초기 현금', p.cash ? p.cash.text : null, p.cash ? (p.gapFund ? `대출 후 · 갭 ${esc(p.gapFund)}` : '대출 후 자기자금') : '실거주매매가 미확보')
+    + tile('최종투자', investV, num(p.levy) !== null ? `분담금 ${fmtCell(p.levy)} 포함` : investV ? '레인지 · 분담금 미확정' : '분양가 · 권리가액 미확보')
+    + tile(`안전마진${marginV ? gb : ''}`, marginV, num(p.compare) !== null ? `비교시세 ${fmtCell(p.compare)}` : '비교시세 미확보', marginCls);
+  return `<div class="kpi">${kpi}</div>${chart}<div class="rows">${rows.join('')}</div><div class="cav">${cav}</div>`;
 }
 
 function kvTable(r, c) {
@@ -609,9 +628,12 @@ function regionPage(c, i) {
   const entry = [p.cash ? `초기 현금 <b>${esc(p.cash.text)}억</b>` : '초기 현금 —', p.gapFund ? `갭 기준 ${esc(p.gapFund)}억 참고` : null,
     c.toheo === '비대상' ? '토허 비대상' : c.toheo === '대상' ? '토허 허가 · 2년 실거주' : '토허 미확인'].filter(Boolean).join(' · ');
   const openQs = questions.filter((q) => c.openIds.includes(q.id));
-  const qLines = openQs.slice(0, 3).map((q) => `<span><b>${esc(q.id)}</b> ${esc(cut(q.what, 38))}</span>`).join('') + (openQs.length > 3 ? `<span>외 ${openQs.length - 3}건</span>` : '');
+  const qLines = openQs.slice(0, 3).map((q) => `<span><b>${esc(q.id)}</b> ${esc(q.what)}</span>`).join('') + (openQs.length > 3 ? `<span class="etc">외 ${openQs.length - 3}건 — 아래 '확인 중인 질문'</span>` : '');
+  const riskHtml = c.riskFirst || c.riskLead
+    ? `${c.riskLead ? `<b>${esc(c.riskLead)}</b> ` : ''}${esc(c.riskFirst || '')}${c.riskRest ? `<details class="more"><summary>더 보기</summary><div>${esc(c.riskRest)}</div></details>` : ''}`
+    : '—';
   const judge = `<div class="jr"><span class="k">진입 <small>실거주</small></span><div>${entry}</div></div>`
-    + `<div class="jr"><span class="k">최대 리스크</span><div>${esc(c.riskLine || '—')}</div></div>`
+    + `<div class="jr"><span class="k">최대 리스크</span><div>${riskHtml}</div></div>`
     + `<div class="jr"><span class="k">확인 필요</span><div class="ql">${qLines || '없음'}</div></div>`;
   const box = (on, label, note) => `<div><div class="box ${on ? 'on' : 'half'}">${on ? '✓' : '△'}</div>${esc(label)}<span>${esc(note)}</span></div>`;
   const checks = box(!!c.baseDate, '권리산정기준일', c.baseDate ? c.baseDate + (c.baseDateGrade ? ' ' + c.baseDateGrade : '') : '고시일 확인')
