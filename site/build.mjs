@@ -390,7 +390,7 @@ const cards = summary.rows.map((row) => {
   const baseDateGrade = bd ? (strip(bd.value).match(/\(([ABCD])[,)\s]/) || [])[1] || null : null;
   const st = get(r, '단계');
   const stageDocGrade = st ? (strip(st.value + ' ' + st.sub).match(/(?:^|[\s(])([ABCD])(?= —|\)|,)/) || [])[1] || null : null;
-  const contractor = get(r, '시공사') ? cut(firstSentence(get(r, '시공사').value, 30), 24) : null;
+  const contractor = get(r, '시공사') ? cut(strip(get(r, '시공사').value).split(/ \(| — /)[0], 24) : null;   // 괄호·대시 앞까지만: "현대건설 (2025-11-29 …)" → "현대건설"
   const price = {
     buy: strip(row['실거주매매가']), unit: strip(row['조합원분양가']), rights: strip(row['권리가액']), levy: strip(row['추가분담금']), init: strip(row['초기필요자금']),
     invest, compare: strip(row['비교시세(검증)']), margin: strip(row['안전마진(검증)']), marginNum,
