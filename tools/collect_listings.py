@@ -55,8 +55,8 @@ ZONES = [
     dict(name='geumho23', did='2453', title='금호23', file='05_geumho23', basedate=None, anchor='구역 내 실거래 없음(단독다가구 지번 마스킹)'),
     dict(name='jangwi15', did='2327', title='장위15', file='06_jangwi15', basedate=None, anchor='233-42 실거래 10.00억(2026-06, 대지권 61.32㎡, A)'),
     dict(name='sangdo16', did='3691', title='상도16', file='07_sangdo16', basedate='2025-05-23', anchor='구역 내 실거래 중앙값 4.60억 · 대지권27㎡+ 중앙값 5.70억(A)'),
-    dict(name='galhyeon510-1', did='4640', title='갈현동 510-1', file='09_galhyeon510-1', basedate='2026-07-01', anchor='구역계 미확정 — 502~529번지 근사 집계(추정 블록)'),
-    dict(name='sutaek2', did='4074', title='수택2', file='10_sutaek2', basedate='2023-07-13', anchor='구역계 근사 98건 중앙값 3.80억(2026, A)'),
+    dict(name='galhyeon510-1', did='4640', title='갈현동 510-1', file='08_galhyeon510-1', basedate='2026-07-01', anchor='구역계 미확정 — 502~529번지 근사 집계(추정 블록)'),
+    dict(name='sutaek2', did='4074', title='수택2', file='09_sutaek2', basedate='2023-07-13', anchor='구역계 근사 98건 중앙값 3.80억(2026, A)'),
 ]
 
 session = requests.Session()
