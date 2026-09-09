@@ -14,7 +14,8 @@
 | `regions/NN_slug.md` | 구역 상세 + 추정 블록. 구역당 1파일, 헤더 없음(갱신일은 git) | 해당 구역 세션마다 |
 | `20_POLICY_CHECKLIST_SOURCES.md` | 정책 동향·체크리스트·출처 | 수시 |
 | `DECISIONS.md` | 레지스트리 수치의 판단 근거 로그 | 판단 발생 시 |
-| `tools/collect_listings.py` | 매물 자동수집(재개발닷컴) → `regions/*.md`의 `## 매물` 절 통째 교체. `.github/workflows/listings.yml`이 매주 금 04:00 KST 실행 | 자동 · 주 1회 |
+| `tools/collect_listings.py` | 매물 자동수집(재개발닷컴) → `regions/*.md`의 `## 매물` 절 통째 교체 + `data/listings/` 스냅샷 기록. `.github/workflows/listings.yml`이 매주 금 04:00 KST 실행 | 자동 · 주 1회 |
+| `data/listings/*.jsonl` | 매물 회차 스냅샷. 필터 전 전체를 남기는 기계 축적본(append-only, 회차당 1파일). 형식은 `data/README.md` | 자동 · 주 1회 |
 
 **충돌 시 우선순위: 10(regions/ 포함) > 00 > 20**
 
@@ -152,3 +153,4 @@ PC·모바일·클라우드 세션을 동시에 열 수 있다. 같은 파일을
 - **`## 매물` 절**(구역 파일)의 호가·매력도 점수는 D등급 참고자료다. 요약표·추정 블록의 어떤 계산에도 쓰지 않는다. 채점 규칙은 `DECISIONS.md` #19, 파서 규약은 `site/README.md` 6번
 - **`## 매물` 절에는 예산 필터를 통과한 매물만 실린다** — 호가 6.00억 이상 8.00억 이하(실거주 기준 초기투자금(대출 포함) 상한 8억 · 이상 구간 6~7억, 사용자 2026-09-08 결정, `DECISIONS.md` #19 4·5차). **예외는 하나 — 하한 미만이라도 매력도 점수가 그 구역 예산 통과분 최고점 이상이면 싣는다.** 상한 초과에는 예외가 없다. 범위 밖 매물은 표에 없고 제외 건수만 노트에 남는다. **이 절은 구역 전체 매물 목록이 아니다.** 예산이 바뀌면 `tools/collect_listings.py`의 `PRICE_MIN`·`PRICE_MAX` 한 곳만 고치고 재수집한다
 - **`## 매물` 절은 매주 금요일 04:00(KST) GitHub Actions가 자동 교체한다** (`auto-listings:` 커밋). 승인 없이 바뀌는 유일한 예외다. 세션에서 이 절을 손으로 고치지 않는다 — 다음 자동 실행이 덮어쓴다. 구역 사실(권리산정기준일·기준 앵커)이 바뀌면 `tools/collect_listings.py`의 ZONES를 고친다
+- **`## 매물` 절은 판단용 뷰이고, 같은 실행이 `data/listings/YYYY-MM-DD.jsonl`에 필터 전 전체를 회차별로 쌓는다.** 지난 회차 호가·점수는 md가 아니라 이 파일에서 읽는다. 손으로 고치거나 지우지 않는다(append-only). 형식은 `data/README.md`

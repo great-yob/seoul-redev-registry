@@ -24,3 +24,6 @@ _site/
 
 __pycache__/
 *.pyc
+
+# 매물 회차 스냅샷 — 부분 실행(--only 이거나 수집 실패 섞인 회차)분은 이력에 섞지 않는다
+data/listings/*.partial.jsonl

@@ -3,17 +3,23 @@
 GitHub Actions(.github/workflows/listings.yml)가 매주 금요일 04:00 KST에 실행한다. 로컬에서도 같은 명령으로 돈다.
     python tools/collect_listings.py [--only sangdo16,jangwi15] [--dry-run] [--out DIR] [--summary FILE]
                                      [--min-price 6.0] [--max-price 8.0]   # 하한 이상 ~ 상한 이하
+                                     [--history-dir data/listings]
 
 원칙 (DECISIONS #19)
 - 호가·매물은 D등급. 점수는 구역 내 상대 순위(100점, 랭크 정규화)이며 어떤 계산에도 쓰지 않는다.
 - 예산 필터: 호가 PRICE_MIN 이상 PRICE_MAX 이하만 표에 남긴다. 예외는 하나 — 하한 미만이라도 점수가 예산 통과분 최고점 이상이면 싣는다.
   점수는 필터 전 구역 전체 기준이라 예외 판정이 가능하다. 제외 건수·구역 호가 범위는 노트에 남긴다 — 조용히 빼지 않는다.
 - `## 매물` 절은 행 단위 수정이 아니라 절 통째 교체. 다른 줄은 건드리지 않는다.
+- 원본(md)과 축적(jsonl)을 분리한다. md 는 예산 통과분만 보여 주는 판단용 뷰이고, `data/listings/YYYY-MM-DD.jsonl` 은
+  필터 전 전 구역 전체를 남기는 기계 축적본이다(append-only, 회차당 1파일). 형식은 `data/README.md`.
+  `--only` 이거나 수집 실패 구역이 있으면 스냅샷이 부분이므로 `.partial.jsonl` 로 떨어뜨린다 — gitignore 되어 이력에 섞이지 않는다.
+  `--dry-run` 은 md 만 건너뛴다(이력은 남긴다).
 - 조용히 틀리지 않는다: 목록 페이지가 200이 아니거나 전 구역 수집 합계(예산 필터 전) 0건이면 exit 1 → CI 실패, 커밋 없음.
 - 의존성: requests 뿐. .env 불필요.
 """
 import argparse
 import datetime as dt
+import io
 import json
 import os
 import re
@@ -269,11 +275,16 @@ def score_zone(Z, asks, meta, pmin, pmax):
             r['low_exc'] = True
             keep.append(r)
     n_exc = len(keep) - len(inb)
+    kept_ids = {id(r) for r in keep}
+    for r in rows:
+        r['in_budget'] = pmin <= r['price'] <= pmax
+        r['kept'] = id(r) in kept_ids
+    all_rows = rows                 # 이력용 — 필터 전 전체(중복 제거 후). md 는 keep 만 쓴다
     rows = keep
     rows.sort(key=lambda r: (-r['score'], r['price']))
     for i, r in enumerate(rows):
         r['rank'] = i + 1
-    return rows, basedate, bsrc, bool(rings), dict(n_dedup=n_dedup, span=span, n_inb=len(inb), n_exc=n_exc, cut=cut)
+    return rows, basedate, bsrc, bool(rings), dict(n_dedup=n_dedup, span=span, n_inb=len(inb), n_exc=n_exc, cut=cut, all=all_rows)
 
 
 # ---------------------------------------------------------------- 링크 · md
@@ -358,6 +369,43 @@ def apply_section(path, block, dry_run):
     return prev
 
 
+# ---------------------------------------------------------------- 이력 (jsonl)
+def r_(v, nd):
+    return None if v is None else round(v, nd)
+
+
+def history_records(Z, st, basedate, bsrc, has_poly, stage, n_registered, today, pmin, pmax):
+    """회차 스냅샷 레코드. `t` 로 종류를 구분한다 — 구역당 zone 1행 + 필터 전 전체 ask N행.
+
+    md 는 예산 통과분만 싣지만 이력은 필터 전 전체를 남긴다. 예산 기준이 바뀌어도 과거 회차를 다시 계산할 수 있어야 한다.
+    통과 0건인 구역도 zone 행은 남는다 — '수집했으나 0건'과 '수집 실패'를 구분하기 위해서다.
+    """
+    span = st['span']
+    out = [dict(t='zone', date=today, zone=Z['name'], title=Z['title'], did=Z['did'], stage=stage,
+                registered=n_registered, dedup=st['n_dedup'], in_budget=st['n_inb'], low_exc=st['n_exc'],
+                kept=st['n_inb'] + st['n_exc'], cut=st['cut'],
+                price_min=r_(span[0], 4) if span else None, price_max=r_(span[1], 4) if span else None,
+                budget_min=pmin, budget_max=pmax,
+                basedate=basedate, basedate_src=bsrc if basedate else None, poly=has_poly)]
+    for r in st['all']:
+        loc = r['loc'] if isinstance(r['loc'], list) else None
+        out.append(dict(t='ask', date=today, zone=Z['name'], id=r['id'], addr=r['addr'], typ=r['typ'],
+                        price=r_(r['price'], 4), share=r_(r['share'], 2), unit=r_(r['unit'], 5),
+                        floor=r['floor'], max_floor=r['maxf'], use_apr=r['apr'] or None, year=r['yr'],
+                        after_basedate=r['after'], inside=r['inside'], land=r['is_land'],
+                        score=r['score'], rank=r.get('rank'), in_budget=r['in_budget'], kept=r['kept'],
+                        low_exc=bool(r.get('low_exc')), anom=bool(r.get('anom')), flags=r['flags'],
+                        lng=r_(loc[0], 7) if loc else None, lat=r_(loc[1], 7) if loc else None))
+    return out
+
+
+def write_history(path, records):
+    """회차당 1파일. 키 정렬·LF 고정 — 회차 간 diff 가 실제 변화만 보이게 한다."""
+    with io.open(path, 'w', encoding='utf-8', newline='\n') as f:
+        for rec in records:
+            f.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + '\n')
+
+
 # ---------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser()
@@ -365,6 +413,7 @@ def main():
     ap.add_argument('--dry-run', action='store_true', help='파일을 쓰지 않고 요약만')
     ap.add_argument('--out', help='생성한 md 블록을 이 디렉터리에 저장')
     ap.add_argument('--summary', help='커밋 메시지용 요약을 이 파일에 저장')
+    ap.add_argument('--history-dir', default=os.path.join(ROOT, 'data', 'listings'), help='회차 스냅샷 jsonl 디렉터리. 기본 data/listings')
     ap.add_argument('--min-price', type=float, default=PRICE_MIN, help=f'예산 필터 하한(억, 이상). 기본 {PRICE_MIN}')
     ap.add_argument('--max-price', type=float, default=PRICE_MAX, help=f'예산 필터 상한(억, 이하). 기본 {PRICE_MAX}')
     args = ap.parse_args()
@@ -373,7 +422,7 @@ def main():
     today = dt.datetime.now(KST).strftime('%Y-%m-%d')
     if args.out:
         os.makedirs(args.out, exist_ok=True)
-    results, errors = [], []
+    results, errors, history = [], [], []
     for Z in ZONES:
         if only and Z['name'] not in only:
             continue
@@ -390,6 +439,7 @@ def main():
         block = render_md(Z, rows, len(asks), basedate, bsrc, has_poly, today, st, pmin, pmax)
         if args.out:
             open(os.path.join(args.out, f'md_{Z["name"]}.md'), 'w', encoding='utf-8').write(block)
+        history += history_records(Z, st, basedate, bsrc, has_poly, meta.get('stage'), len(asks), today, pmin, pmax)
         prev = apply_section(os.path.join(ROOT, 'regions', Z['file'] + '.md'), block, args.dry_run)
         top = ' · '.join(f'{r["addr"].split()[-1]}({r["score"]})' for r in rows[:3])
         results.append(dict(title=Z['title'], prev=prev, now=len(rows), dedup=st['n_dedup'], exc=st['n_exc'], registered=len(asks), stage=meta.get('stage'), top=top))
@@ -410,6 +460,14 @@ def main():
     if args.summary:
         open(args.summary, 'w', encoding='utf-8').write(summary)
     print('\n' + summary)
+    if history:
+        # 부분 스냅샷(구역 일부만 돌았거나 실패가 섞인 회차)은 .partial 로 떨어뜨린다 — gitignore 되어 이력에 섞이지 않는다
+        partial = bool(only) or bool(errors)
+        os.makedirs(args.history_dir, exist_ok=True)
+        hp = os.path.join(args.history_dir, f'{today}{".partial" if partial else ""}.jsonl')
+        write_history(hp, history)
+        print(f'history: {hp} — {len(history)}행 (zone {len(results)} + ask {len(history) - len(results)})'
+              + ('  ** 부분 실행 — 커밋 대상 아님 **' if partial else ''))
     if errors:
         print(f'FAIL  {len(errors)}개 구역 목록 페이지 수집 실패 — 커밋하지 않는다', file=sys.stderr)
         return 1
