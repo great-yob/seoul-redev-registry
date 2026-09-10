@@ -75,6 +75,44 @@ cat data/listings/*.jsonl | jq -r 'select(.t=="zone") | [.date, .zone, .dedup, .
 
 `.partial.jsonl` 은 위 글롭에 걸리지 않는다(`*.jsonl` 에는 걸리므로 시계열을 만들 땐 `[0-9]*-[0-9]*-[0-9]*.jsonl` 로 좁힌다).
 
+## `data/vworld/` — 브이월드 응답 축적
+
+`tools/vworld_probe.py` 가 쓴다. 사람이 손으로 고치지 않는다.
+
+| 파일 | 성격 |
+| :-- | :-- |
+| `queue.json` | 태스크 큐. 미해결 항목(Q번호)별 대상 필지·진행 커서·주기·차단 상태 |
+| `YYYY-MM-DD.jsonl` | 그 날 받은 응답 원본. 회차당 1파일, append-only |
+
+### `queue.json`
+
+`policy` 가 한 번 실행의 상한이다(`max_tasks_per_run`·`call_budget_per_run`). 태스크는 `cursor` 로 어디까지 받았는지 기억하므로
+**며칠에 걸쳐 이어받는다** — 연속 에러 3회면 커서를 남기고 `blocked_until` 을 다음 날로 찍고 조용히 끝낸다(exit 0).
+
+- `cadence` — `once`(끝나면 done) / `weekly` / `monthly`(끝나면 `cursor` 0 으로 되돌리고 `last_cycle` 기록 → 주기 도래 시 재조회)
+- `source: listings` — `--build-queue` 가 `data/listings` 최신 스냅샷의 `inside: true` 지번으로 `parcels` 를 채운다. 지오코딩 호출 0회.
+  새 지번은 **뒤에 붙인다** — 커서가 가리키는 위치가 밀리면 안 된다
+- `params` — 요청에 그대로 실린다. 공시가격 계열은 `stdrYear` 를 반드시 지정한다(안 하면 20년치가 와서 잘린다)
+
+### `YYYY-MM-DD.jsonl`
+
+한 줄 = 필지 1개 조회 결과. `t` 가 종류(`landuse`·`aptprice`·`landprice`·`houseprice`)다.
+
+| 키 | 뜻 |
+| :-- | :-- |
+| `t` `date` `q` `zone` | 종류 · 조회일(KST) · 미해결 질문 번호 · 구역 slug |
+| `jibun` `pnu` | 지번 · PNU 19자리 |
+| `n` `total` | 받은 행 수 · 응답의 `totalCount` |
+| `trunc` | `n < total` 일 때만 붙는다 — **잘린 회차다. 그대로 집계하면 안 된다** |
+| `rows` | 응답 행 원본(중복 키 `pnu`·`ldCode`·`ldCodeNm`·`mnnmSlno` 만 제거) |
+
+**요약해서 쌓지 않는다.** "토허 몇 건"으로 줄이면 나중에 다른 질문(정비구역·용도지역·지구단위)을 물을 때 다시 찔러야 한다.
+판정은 읽는 쪽에서 한다 — `python tools/vworld_probe.py --report [zone]` 이 회차별로 집계하고 **회차 간 변화를 짚어 준다**(감시 태스크의 존재 이유).
+
+`n: 0` 은 **"해당 사항 없음"이 아니다.** 일부 PNU 가 빈 응답을 준다(`DECISIONS.md` #25). 판정에서 빼고, 빠졌다는 사실을 적는다.
+
+---
+
 ## 왜 DB 가 아닌가
 
 10구역 · 회차당 수백 행 규모에서 DB 가 풀어 줄 문제가 없다. 파일로 두면 비용 0, diff 리뷰 유지,
