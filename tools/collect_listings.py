@@ -51,7 +51,7 @@ PRICE_MIN, PRICE_MAX = 5.0, 8.0   # 억. PRICE_MIN 이상 ~ PRICE_MAX 이하(양
 # anchor 는 노트에 찍는 기준 앵커 문구(레지스트리 요약). 구역 파일의 사실이 바뀌면 여기도 맞춘다.
 ZONES = [
     dict(name='dapsimni489', did='2153', title='답십리동 489', file='01_dapsimni489', basedate='2023-12-07', anchor='구역 내 실거래 없음(Q8) · 개별공시지가 중앙값 407만원/㎡(A)'),
-    dict(name='jayang655', did='4641', title='자양1동 655', file='02_jayang655', basedate=None, anchor='구역 내 실거래 3건 4.00~7.00억(2026, A)'),
+    dict(name='jayang655', did='4641', title='자양1동 655', file='02_jayang655', basedate='2026-05-18', anchor='구역 내 실거래 3건 4.00~7.00억(2026, A)'),
     dict(name='cheonho338', did='1738', title='천호동 338', file='03_cheonho338', basedate='2024-05-23', anchor='구역 내 실거래 4건 3.99~6.23억(2026, A)'),
     dict(name='jangwi15', did='2327', title='장위15', file='04_jangwi15', basedate=None, anchor='233-42 실거래 10.00억(2026-06, 대지권 61.32㎡, A)'),
     dict(name='sangdo16', did='3691', title='상도16', file='05_sangdo16', basedate='2025-05-23', anchor='구역 내 실거래 중앙값 4.60억 · 대지권27㎡+ 중앙값 5.70억(A)'),
