@@ -352,7 +352,7 @@ function cashOf(priceCell) {
 
 // ---------------------------------------------------------------- 카드 데이터
 const byNo = new Map(regions.map((r) => [r.no, r]));
-const cards = summary.rows.map((row) => {
+const allCards = summary.rows.map((row) => {
   const no = num(row['#']);
   const r = byNo.get(no);
   if (!r) fail(`요약표 ${no}번에 대응하는 regions/${String(no).padStart(2, '0')}_*.md 가 없다`);
@@ -416,8 +416,37 @@ const cards = summary.rows.map((row) => {
 });
 for (const q of questions) {
   if (q.region === '전구역') continue;
-  if (!cards.some((c) => c.questions.includes(q.id))) warn(`OPEN QUESTIONS ${q.id}의 구역 '${q.region}'이 어느 구역과도 매칭되지 않았다`);
+  if (!allCards.some((c) => c.questions.includes(q.id))) warn(`OPEN QUESTIONS ${q.id}의 구역 '${q.region}'이 어느 구역과도 매칭되지 않았다`);
 }
+
+// ---------------------------------------------------------------- 숨김 구역 (site/hidden.json)
+// 데이터(10 · regions/ · data/)는 그대로 두고 페이지에서만 뺀다. 되살리려면 hidden.json의 항목을 지우고 다시 빌드한다.
+// 숨김은 페이지 전역이다 — 카드 · 단계 맵 · 구역 페이지 · 문서 뷰의 요약표/OPEN QUESTIONS 행 · data.json.
+const HIDDEN_FILE = path.join(ROOT, 'site', 'hidden.json');
+let hiddenEntries = [];
+if (existsSync(HIDDEN_FILE)) {
+  let cfg = null;
+  try { cfg = JSON.parse(readFileSync(HIDDEN_FILE, 'utf8')); } catch (e) { fail(`site/hidden.json 파싱 실패: ${e.message}`); }
+  if (!Array.isArray(cfg.hidden)) fail('site/hidden.json: hidden 이 배열이 아니다');
+  hiddenEntries = cfg.hidden;
+}
+const hiddenNos = new Set();
+for (const h of hiddenEntries) {
+  const c = allCards.find((x) => x.no === Number(h.no));
+  if (!c) fail(`site/hidden.json: ${h.no}번 구역이 요약표에 없다 — 번호를 고치거나 항목을 지운다`);
+  if (h.name && ![norm(h.name), alt(h.name)].some((x) => x && (norm(c.name).includes(x) || x.includes(norm(c.name))))) warn(`site/hidden.json ${h.no}번 이름 불일치: '${h.name}' ≠ '${c.name}'`);
+  hiddenNos.add(c.no);
+}
+const hidden = allCards.filter((c) => hiddenNos.has(c.no)).map((c) => {
+  const h = hiddenEntries.find((x) => Number(x.no) === c.no) || {};
+  return { no: c.no, name: c.name, slug: c.slug, since: h.since || null, reason: h.reason || null };
+});
+const cards = allCards.filter((c) => !hiddenNos.has(c.no));
+if (!cards.length) fail('site/hidden.json이 모든 구역을 숨겼다 — 페이지에 남는 구역이 없다');
+// 숨긴 구역에만 달린 질문은 개수·문서 뷰에서 함께 뺀다(전구역 질문은 남는다)
+const qVisible = (q) => q.region === '전구역' || cards.some((c) => c.questions.includes(q.id));
+const shownQuestions = questions.filter(qVisible);
+const hiddenQIds = new Set(questions.filter((q) => !qVisible(q)).map((q) => q.id));
 
 const toheoCount = cards.filter((c) => c.toheo === '대상').length;
 const pills = [
@@ -440,7 +469,7 @@ function tagsHtml(c) {
   return to + b + trust;
 }
 const seoulCount = cards.filter((c) => c.seoul !== false).length;
-const openUnique = new Set(questions.filter((q) => !q.resolved).map((q) => q.id)).size;
+const openUnique = new Set(shownQuestions.filter((q) => !q.resolved).map((q) => q.id)).size;
 const computed = cards.filter((c) => c.price.marginNum !== null);
 const appraised = computed.filter((c) => c.basis && (c.basis.grade === 'A' || c.basis.grade === 'B')).length;
 const lead = `서울 ${seoulCount} · 서울 외 ${cards.length - seoulCount} · 안전마진 산출 ${computed.length}곳 (감정평가 기반 ${appraised}) · 확인 중 ${openUnique}건`;
@@ -496,10 +525,26 @@ const fill = (tpl, map) => tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => (k in map ? m
 // ---------------------------------------------------------------- 문서 뷰
 const REPO = 'great-yob/seoul-redev-registry';
 const mdBlock = (id, md) => `<script type="text/markdown" id="md-${id}">${md.replace(/<\/script/gi, '<\\/script')}</script>`;
+// 문서 뷰는 원문을 그대로 싣되, 10의 요약표·OPEN QUESTIONS에서 숨김 구역 행만 뺀다. 다른 문서의 서술은 건드리지 않는다.
+function docText(file) {
+  const md = read(file);
+  if (file !== '10_REGION_REGISTRY.md' || !hiddenNos.size) return md;
+  const names = [...hiddenNos].map((n) => norm(allCards.find((c) => c.no === n).name));
+  let dropped = 0;
+  const out = md.split('\n').filter((l) => {
+    if (!l.trim().startsWith('|')) return true;
+    const c = splitCells(l);
+    const row = hiddenNos.has(Number(strip(c[0]))) && c[1] !== undefined && names.includes(norm(c[1]));
+    if (row || hiddenQIds.has(strip(c[0]))) { dropped++; return false; }
+    return true;
+  }).join('\n');
+  if (dropped < hiddenNos.size) warn(`문서 뷰: 10 요약표에서 숨김 구역 행을 ${dropped}줄만 걷어냈다 (숨김 ${hiddenNos.size}곳)`);
+  return out;
+}
 const docs = [
   { id: 'brief', label: '00 · 브리프', file: '00_PROJECT_BRIEF.md' },
   { id: 'registry', label: '10 · 요약표', file: '10_REGION_REGISTRY.md' },
-  { id: 'regions', label: `구역 1~${cards.length}`, sections: cards.map((c) => ({ id: 'r' + String(c.no).padStart(2, '0'), file: `regions/${c.slug}.md` })) },
+  { id: 'regions', label: `구역 ${cards.length}곳`, sections: cards.map((c) => ({ id: 'r' + String(c.no).padStart(2, '0'), file: `regions/${c.slug}.md` })) },
   { id: 'policy', label: '20 · 정책 · 출처', file: '20_POLICY_CHECKLIST_SOURCES.md' },
   { id: 'decisions', label: 'DECISIONS', file: 'DECISIONS.md' },
 ];
@@ -511,7 +556,7 @@ const panelsHtml = docs.map((d) => {
   }
   return `<div class="doc" id="panel-${d.id}"><div class="doc-meta">${link(d.file)} (GitHub에서 보기)</div><div class="content" data-md="md-${d.id}"></div></div>`;
 }).join('');
-const mdBlocks = docs.flatMap((d) => (d.sections ? d.sections.map((s) => mdBlock(s.id, read(s.file))) : [mdBlock(d.id, read(d.file))])).join('\n');
+const mdBlocks = docs.flatMap((d) => (d.sections ? d.sections.map((s) => mdBlock(s.id, docText(s.file))) : [mdBlock(d.id, docText(d.file))])).join('\n');
 
 // ---------------------------------------------------------------- 구역 페이지
 // 스테퍼는 사업방식별 축. 모아타운(빈집법)은 관리처분인가가 따로 없고 사업시행계획인가에 포함된다.
@@ -694,7 +739,7 @@ const common = { VERSION: registry.version, UPDATED: registry.updated, COUNT: St
 writeFileSync(path.join(OUT, 'index.html'), fill(readFileSync(path.join(TPL, 'index.html'), 'utf8'), { ...common, LEAD: esc(lead), STAGEMAP: stagemap, PILLS: pillsHtml, GROUPS: groupsHtml }));
 writeFileSync(path.join(OUT, 'docs.html'), fill(readFileSync(path.join(TPL, 'docs.html'), 'utf8'), { ...common, TABS: tabsHtml, PANELS: panelsHtml, MD_BLOCKS: mdBlocks }));
 cards.forEach((c, i) => writeFileSync(path.join(OUT, 'regions', nn(c) + '.html'), regionPage(c, i)));
-writeFileSync(path.join(OUT, 'data.json'), JSON.stringify({ registry, built, warnings, rules: { ltv: LTV, caps: CAPS, fee: !!feeText }, stages: STAGES.map((s) => s[0]), pills, cards, questions }, null, 2));
+writeFileSync(path.join(OUT, 'data.json'), JSON.stringify({ registry, built, warnings, rules: { ltv: LTV, caps: CAPS, fee: !!feeText }, stages: STAGES.map((s) => s[0]), pills, cards, hidden, questions: shownQuestions }, null, 2));
 if (existsSync(path.join(ROOT, 'site', 'static'))) for (const f of readdirSync(path.join(ROOT, 'site', 'static'))) writeFileSync(path.join(OUT, f), readFileSync(path.join(ROOT, 'site', 'static', f)));
 
-console.log(`ok  ${registry.version} · ${cards.length}개 구역 · ${GROUPS.map(([, t, , pred]) => `${t} ${cards.filter(pred).length}`).filter((s) => !/ 0$/.test(s)).join(' / ')} · 미해결 ${openUnique} · 경고 ${warnings.length}`);
+console.log(`ok  ${registry.version} · ${cards.length}개 구역${hidden.length ? ` · 숨김 ${hidden.map((h) => h.no + ' ' + h.name).join(' · ')}` : ''} · ${GROUPS.map(([, t, , pred]) => `${t} ${cards.filter(pred).length}`).filter((s) => !/ 0$/.test(s)).join(' / ')} · 미해결 ${openUnique} · 경고 ${warnings.length}`);
