@@ -278,30 +278,38 @@ function stageShort(stage, unverified) {
   return unverified && !/미검증/.test(seg) ? seg + ' · 미검증' : seg;
 }
 
-// 단계 → 단계 맵 행. 사업방식별로 같은 키워드가 다른 위치를 뜻한다. 행 이름은 "다음 관문", 작은 글씨는 현재 상태.
+// 단계 → 단계 맵 행. **행 이름은 "현재까지 완료한 단계"**이고 작은 글씨가 사업방식별 이름이다 (2026-09-15 재설계).
+// 이전 규약은 "다음 관문"이었다 — 재개발닷컴 진행현황과 어긋나 상도16이 '구역지정', 자양655가 '관리계획 고시'에
+// 놓였다. 사용자가 기대하는 것은 '기획완료'·'대상지선정', 즉 **마지막으로 끝난 단계**다. 축도 재개발닷컴에 맞췄다.
 const STAGES = [
-  ['신청 · 접수', '후보지 신청 전'],
-  ['후보지 · 대상지 선정', '선정 대기'],
-  ['구역지정 · 관리계획 고시', '지정 · 고시 진행'],
-  ['조합설립인가', '조합 설립 진행'],
-  ['사업시행인가', '인가 준비 · 모아타운은 관리처분 포함'],
-  ['관리처분인가', '인가 대기 · 모아타운 해당 없음'],
-  ['착공', '관리처분 후 · 이주 · 철거'],
-  ['공사 중', '착공 후 · 입주 대기'],
+  ['신청 · 접수 전', '후보지 신청 준비 · 연번부여'],
+  ['대상지 · 후보지 선정', '선정 완료 · 다음은 기획 / 관리계획'],
+  ['기획 완료 · 관리계획 수립', '신통기획 확정 · 모아타운 관리계획 수립 완료'],
+  ['구역지정 · 관리계획 고시', '정비구역 지정 · 모아타운 관리계획 고시'],
+  ['조합설립인가', '조합 설립 완료 · 통합심의 통과 포함'],
+  ['사업시행인가', '모아타운은 사업시행계획인가(관리처분 포함)'],
+  ['관리처분인가', '모아타운 해당 없음'],
+  ['착공', '이주 · 철거 후'],
+  ['입주', '준공'],
 ];
+// 가장 앞선 단계부터 내려오며 **끝난 것**을 찾는다. 부정형(미·전·예정·중·준비)은 그 단계를 끝난 것으로 치지 않고
+// 다음 규칙으로 흘려보낸다. `.*` 는 쓰지 않는다 — '미'를 삼켜 부정형을 완료로 읽는다(2026-09-15 자양655 사고).
+const NEG = '(전|예정|대기|준비|추진|중|신청|목표|진행)';
+const notYet = (head, gap) => new RegExp(`${head}[^·]{0,${gap}}?${NEG}`);
 function stageRow(method, stage) {
   const s = strip(stage);
   const moa = /모아/.test(method);
-  if (/착공/.test(s)) return 7;
-  if (/관리처분/.test(s)) return 6;
-  if (/사업시행인가/.test(s)) return /진행|준비|목표/.test(s) ? 4 : 5;
-  if (/통합심의/.test(s)) return moa ? 2 : 4;
-  // 부정 표현을 '고시 완료'로 읽지 않는다 (2026-09-15). `관리계획.*고시` 의 `.*` 가 '관리계획 미고시'의 '미'를 삼켜
-  // 자양655를 조합설립인가 행에 올린 적이 있다. 뒤돌아보기로 '미'를, 앞보기로 '전·예정'을 막는다.
+  if (/입주/.test(s) && !/예상\s*입주/.test(s) && !notYet('입주', 2).test(s)) return 8;
+  if (/착공/.test(s) && !notYet('착공', 2).test(s)) return 7;
+  if (/관리처분인가/.test(s) && !notYet('관리처분', 4).test(s)) return 6;
+  if (/사업시행(계획)?인가/.test(s) && !notYet('사업시행', 8).test(s)) return 5;
+  if (/통합심의\s*(통과|가결)/.test(s)) return moa ? 3 : 4;   // 통합심의 통과 = 조합설립 완료 · 사업시행인가 직전
+  if (/조합설립인가/.test(s) && !notYet('조합설립', 6).test(s) && !/조합설립[^·]{0,6}?(동의|징구)/.test(s)) return 4;
   if (/관리계획.{0,10}?(?<!미)고시(?!\s*(전|예정))|정비구역\s*(?<!미)지정(?!\s*(전|예정))/.test(s)) return 3;
-  if (/조합설립/.test(s)) return /징구|동의|준비|추진/.test(s) ? 3 : 4;
-  if (/후보지 선정|대상지 선정/.test(s)) return 2;
-  if (/추진위|접수|신청/.test(s)) return 0;
+  if (/(신통)?기획\s*(확정|완료)|추진위\s*승인/.test(s)) return 2;
+  if (/관리계획\s*수립/.test(s) && !notYet('관리계획', 4).test(s)) return 2;
+  if (/(후보지|대상지)\s*선정/.test(s)) return 1;
+  if (/연번부여|추진위|접수|신청/.test(s)) return 0;
   return null;
 }
 
@@ -510,8 +518,8 @@ function card(c) {
 // 그룹은 단계 구간. 순위표가 아니다 — 같은 그룹 안에서도 번호순.
 const GROUPS = [
   ['early', '정비구역 지정 전', '구역계 · 기준일 확정 전 · 소멸 리스크', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx <= 2],
-  ['mid', '지정 후 · 사업시행인가 전', '분양가 · 권리가액은 감정평가 전', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx >= 3 && c.stageIdx <= 4],
-  ['late', '관리처분 이후', '입주권 성격 · 재인가 대기', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx >= 5],
+  ['mid', '지정 후 · 관리처분 전', '분양가 · 권리가액은 감정평가 전', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx >= 3 && c.stageIdx <= 5],
+  ['late', '관리처분 이후', '입주권 성격 · 재인가 대기', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx >= 6],
   ['unk', '단계 미분류', '', (c) => c.seoul !== false && c.stageIdx === null],
   ['out', '서울 외', '같은 표에 안 세움', (c) => c.seoul === false],
 ];
@@ -561,10 +569,21 @@ const panelsHtml = docs.map((d) => {
 const mdBlocks = docs.flatMap((d) => (d.sections ? d.sections.map((s) => mdBlock(s.id, docText(s.file))) : [mdBlock(d.id, docText(d.file))])).join('\n');
 
 // ---------------------------------------------------------------- 구역 페이지
-// 스테퍼는 사업방식별 축. 모아타운(빈집법)은 관리처분인가가 따로 없고 사업시행계획인가에 포함된다.
-const STEPS_RE = ['후보지 · 대상지 선정', '구역지정', '조합설립인가', '사업시행인가', '관리처분인가', '착공', '입주'];
-const STEPS_MOA = ['대상지 선정', '관리계획 고시', '조합설립인가', '사업시행계획인가', '착공', '입주'];
-const MOA_STEP = [1, 1, 2, 3, 4, 4, 5, 6];   // stageIdx → 모아타운 스텝(1-based)
+// 스테퍼 축은 사업방식별로 다르다 — 재개발닷컴 진행현황 축에 맞췄다 (2026-09-15). 신통기획은 추진위 승인·기획 완료가
+// 따로 있고, 모아타운은 관리계획 수립과 고시가 갈라지며 관리처분인가가 없다(사업시행계획인가에 포함).
+// 마지막 칸 '입주'만 재개발닷컴에 없는 우리 추가분이다.
+const AXES = {
+  신통: ['대상지 선정', '추진위 승인', '기획 완료', '정비구역 지정', '조합설립인가', '사업시행인가', '관리처분인가', '착공', '입주'],
+  모아: ['대상지 선정', '관리계획 수립', '관리계획 고시', '조합설립인가', '사업시행계획인가', '착공', '입주'],
+  재개발: ['정비구역 지정', '조합설립인가', '사업시행인가', '관리처분인가', '착공', '입주'],
+};
+// STAGES 행(0~8) → 그 축에서 **끝난 칸 수**. 0 은 아직 축의 첫 칸도 못 끝낸 상태다.
+const AXIS_DONE = {
+  신통: [0, 1, 3, 4, 5, 6, 7, 8, 9],
+  모아: [0, 1, 2, 3, 4, 5, 5, 6, 7],
+  재개발: [0, 0, 0, 1, 2, 3, 4, 5, 6],
+};
+const axisOf = (method) => (/모아/.test(method) ? '모아' : /신통/.test(method) ? '신통' : '재개발');
 
 function bar(price, levy, compare, scale) {
   if ([price, levy, compare].some((v) => v === null || v === undefined)) return '';
@@ -663,12 +682,16 @@ function regionPage(c, i) {
     c.moveIn ? `입주 <b>${esc(c.moveIn.text)}</b>${badge(c.moveIn.grade)}` : null, c.nameNote ? esc(c.nameNote) : null,
     c.mapAddr ? `<a class="map" href="https://map.naver.com/p/search/${encodeURIComponent(c.mapAddr)}" target="_blank" rel="noopener">지도 ↗</a>` : null]
     .filter(Boolean).map((x) => `<span>${x}</span>`).join('');
-  const steps = c.moa ? STEPS_MOA : STEPS_RE;
-  const now = c.stageIdx === null ? null : c.moa ? MOA_STEP[c.stageIdx] : Math.max(c.stageIdx, 1);
+  const axis = axisOf(c.method);
+  const steps = AXES[axis];
+  const done = c.stageIdx === null ? null : AXIS_DONE[axis][c.stageIdx];   // 끝난 칸 수
   const stepper = steps.map((s, k) => {
-    const n = k + 1; const cls = now === null ? '' : n < now ? 'done' : n === now ? 'now' : '';
-    const nowNote = c.stageShort.length > 22 && c.stageShort.includes('·') ? c.stageShort.split('·').pop().trim() : c.stageShort;   // 스테퍼 주석은 마지막 토막만
-    const note = n === now ? nowNote : (c.moa && s === '사업시행계획인가' ? '통합심의 · 관리처분 포함' : '');
+    const n = k + 1;
+    const cls = done === null ? '' : n <= done ? 'done' : n === done + 1 ? 'now' : '';
+    const stateNote = c.stageShort.length > 22 && c.stageShort.includes('·') ? c.stageShort.split('·').pop().trim() : c.stageShort;   // 주석은 마지막 토막만
+    const note = done !== null && n === Math.max(done, 1) ? stateNote            // 현재 상태는 마지막 '완료' 칸에 붙인다
+      : done !== null && n === done + 1 && done >= 1 ? '진행 중'                  // 그 다음 칸이 지금 진행 중인 관문
+        : axis === '모아' && s === '사업시행계획인가' ? '통합심의 · 관리처분 포함' : '';
     return `<li class="${cls}">${esc(s)}${note ? `<small>${esc(note)}</small>` : ''}</li>`;
   }).join('');
   const p = c.price;
