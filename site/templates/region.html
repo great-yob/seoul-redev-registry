@@ -5,33 +5,38 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{NAME}} · 서울 재개발 구역 레지스트리</title>
-  <meta name="description" content="{{NAME}} — {{SUB}}. 단계 · 돈의 흐름 · 판단 · 매수 전 확인 4종">
+  <meta name="description" content="{{NAME}} — {{SUB}}. 핵심 사실 · 단계 · 판단 · 돈의 흐름 · 매수 후보 · 매수 전 확인 4종">
   <link rel="stylesheet" href="../site.css">
 </head>
 
 <body>
   <div class="wrap narrow">
     <div class="eyebrow"><a href="../index.html">← 전체</a> · {{UPDATED}} 업데이트</div>
-    <h1>{{NAME}}</h1>
+    <div class="ttl">
+      <h1>{{NAME}}</h1>
+      <div class="tlinks">{{TOPLINKS}}</div>
+    </div>
     <div class="facts">{{FACTS}}</div>
     <div class="tags">{{TAGS}}</div>
+
+    {{FOLD_FACTS}}
 
     <div class="grp-h"><b>단계</b><em>{{STAGE}}</em></div>
     <ol class="vs">{{STEPPER}}</ol>
 
-    <div class="grp-h"><b>돈의 흐름</b><em>84㎡ · 억원</em></div>
-    <div class="pm {{STYLE}}">{{MONEY}}</div>
-
     <div class="grp-h"><b>현재 판단</b></div>
     <div class="jbox">{{JUDGE}}</div>
+    {{FOLD_QS}}
+
+    <div class="grp-h"><b>돈의 흐름</b><em>84㎡ · 억원</em></div>
+    <div class="pm {{STYLE}}">{{MONEY}}</div>
+    {{FOLD_EST}}
 
     {{LISTINGS}}
+    {{FOLD_LISTINGS}}
 
-    <div class="grp-h"><b>매수 전 확인 4종</b><em><a href="../field.html?r={{KEY}}">임장 체크 {{VISIT_N}}항목 ↗</a></em></div>
+    <div class="grp-h"><b>매수 전 확인 4종</b></div>
     <div class="ck">{{CHECKS}}</div>
-
-    <div class="grp-h"><b>관련 문서</b></div>
-    {{FOLDS}}
 
 
     <footer>

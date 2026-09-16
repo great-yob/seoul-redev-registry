@@ -731,9 +731,14 @@ function regionPage(c, i) {
   const r = byNo.get(c.no);
   const facts = [c.district, c.method, c.households ? `<b>${esc(c.households)}</b>` : null, c.area ? esc(c.area) : null,
   c.baseDate ? `기준일 <b>${esc(c.baseDate)}</b>${badge(c.baseDateGrade)}` : null, c.contractor ? `시공사 <b>${esc(c.contractor)}</b>` : null,
-  c.moveIn ? `입주 <b>${esc(c.moveIn.text)}</b>${badge(c.moveIn.grade)}` : null, c.nameNote ? esc(c.nameNote) : null,
-  c.mapAddr ? `<a class="map" href="https://map.naver.com/p/search/${encodeURIComponent(c.mapAddr)}" target="_blank" rel="noopener">지도 ↗</a>` : null]
+  c.moveIn ? `입주 <b>${esc(c.moveIn.text)}</b>${badge(c.moveIn.grade)}` : null, c.nameNote ? esc(c.nameNote) : null]
     .filter(Boolean).map((x) => `<span>${x}</span>`).join('');
+  // 제목 옆 링크 박스 — 지도는 facts 끝에, 임장 체크는 '매수 전 확인' 헤더에 숨어 있어 둘 다 스크롤해야 보였다.
+  // 임장 수는 그 구역치 전부(공통 + 특이사항) — field.html 칩 배지와 같은 수여야 한다
+  const topLinks = [
+    c.mapAddr ? `<a href="https://map.naver.com/p/search/${encodeURIComponent(c.mapAddr)}" target="_blank" rel="noopener">지도 ↗</a>` : null,
+    `<a href="../field.html?r=${encodeURIComponent(c.key)}">임장 체크 <b>${fieldCount + c.visit.length}</b></a>`,
+  ].filter(Boolean).join('');
   const axis = axisOf(c.method);
   const steps = AXES[axis];
   const done = c.stageIdx === null ? null : AXIS_DONE[axis][c.stageIdx];   // 끝난 칸 수
@@ -791,19 +796,22 @@ function regionPage(c, i) {
   const lf = listFold(c);
   const qs = questions.filter((q) => c.questions.includes(q.id));
   const openList = qs.filter((q) => !q.resolved);
-  const folds = [
-    { title: `핵심 사실 · ${r.order.length}항목`, html: kv.html },
-    ef ? { title: '추정 시나리오 · 근거', html: ef.html } : null,
-    lf ? { title: `매물 전체 ${ls.count}건 · 점수 근거`, html: lf } : null,
-    qs.length ? { title: `확인 중인 질문 ${openList.length}${qs.length - openList.length ? ` · 해소 ${qs.length - openList.length}` : ''}`, html: openList.length ? `<ul class="qlist">${openList.map((q) => `<li><b>${esc(q.id)}</b>${esc(q.what)}<small>${esc(q.where)} · ${esc(cut(q.status, 110))}</small></li>`).join('')}</ul>` : '<div class="cav">미해결 없음</div>' } : null,
-  ].filter(Boolean);
-  const foldsHtml = folds.map((f) => `<details class="fold"><summary>${esc(f.title)}</summary><div class="content">${f.html}</div></details>`).join('');
+  // 접힘은 근거다 — '관련 문서' 한 묶음으로 몰아 놓으면 어느 숫자의 근거인지 보이지 않는다.
+  // 각각 자기가 받치는 섹션 바로 아래에 붙인다.
+  const fold = (title, html) => `<details class="fold"><summary>${esc(title)}</summary><div class="content">${html}</div></details>`;
+  const foldFacts = fold(`핵심 사실 · ${r.order.length}항목`, kv.html);
+  const foldEst = ef ? fold('추정 시나리오 · 근거', ef.html) : '';
+  const foldListings = lf ? fold(`매물 전체 ${ls.count}건 · 점수 근거`, lf) : '';
+  const foldQs = qs.length
+    ? fold(`확인 중인 질문 ${openList.length}${qs.length - openList.length ? ` · 해소 ${qs.length - openList.length}` : ''}`,
+      openList.length ? `<ul class="qlist">${openList.map((q) => `<li><b>${esc(q.id)}</b>${esc(q.what)}<small>${esc(q.where)} · ${esc(cut(q.status, 110))}</small></li>`).join('')}</ul>` : '<div class="cav">미해결 없음</div>')
+    : '';
   const prev = cards[i - 1], next = cards[i + 1];
   return fill(readFileSync(path.join(TPL, 'region.html'), 'utf8'), {
     ...common, NAME: esc(c.name), SUB: esc([c.district, c.method, c.households].filter(Boolean).join(' · ')), NO: String(c.no), NO2: nn(c), SLUG: c.slug, UPDATED: c.updated, STYLE: c.style,
     FACTS: facts, TAGS: tagsHtml(c), STAGE: c.stageIdx === null ? `단계 미분류 · ${esc(c.stage)}` : '', STEPPER: stepper,
-    MONEY: moneyHtml(c), JUDGE: judge, LISTINGS: listingsHtml, CHECKS: checks, FOLDS: foldsHtml,
-    KEY: encodeURIComponent(c.key), VISIT_N: String(c.visit.length),
+    MONEY: moneyHtml(c), JUDGE: judge, LISTINGS: listingsHtml, CHECKS: checks,
+    TOPLINKS: topLinks, FOLD_FACTS: foldFacts, FOLD_QS: foldQs, FOLD_EST: foldEst, FOLD_LISTINGS: foldListings,
     PREV: prev ? `<a href="${nn(prev)}.html">‹ ${prev.no} ${esc(prev.name)}</a>` : '<span></span>',
     NEXT: next ? `<a href="${nn(next)}.html">${next.no} ${esc(next.name)} ›</a>` : '<span></span>',
     MD_BLOCKS: [...kv.blocks, ef ? ef.block : ''].join('\n'),
