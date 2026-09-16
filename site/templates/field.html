@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>임장 체크 · 서울 재개발 구역 레지스트리</title>
-  <meta name="description" content="현장에서만 확인되는 것만. 공통 {{FIELD_COUNT}}항목 + 구역별 특이사항. 체크와 메모는 이 브라우저에만 저장된다.">
+  <meta name="description" content="한 구역치 체크리스트 — 공통 {{FIELD_COUNT}}항목 + 그 구역만의 특이사항. 체크와 메모는 이 브라우저에만 저장된다.">
   <link rel="stylesheet" href="site.css">
 </head>
 
@@ -14,15 +14,18 @@
     <div class="eyebrow"><a href="index.html">← 전체</a> · 공통 {{FIELD_VERSION}} · {{FIELD_UPDATED}}</div>
     <h1>임장 체크</h1>
 
-    <div class="grp-h"><span>구역</span><em>탭하면 그 구역 항목이 붙는다</em></div>
+    {{RULES}}
+
+    <div class="grp-h"><b>어느 구역</b><em>한 번에 한 구역</em></div>
     <div class="fchips">{{CHIPS}}</div>
 
-    <div class="ftabs" role="tablist">
-      <button role="tab" data-tab="common" class="on">공통 <b>{{FIELD_COUNT}}</b></button>
-      <button role="tab" data-tab="region">이 구역 <b class="rn">—</b></button>
+    <div id="body" hidden>
+      <div class="ftabs" role="tablist">
+        <button role="tab" data-tab="common" class="on">공통 <b class="cn">—</b></button>
+        <button role="tab" data-tab="region">이 구역만 <b class="rn">—</b></button>
+      </div>
+      <div class="fpanel" id="panel"></div>
     </div>
-
-    <div class="fpanel" id="panel"></div>
 
     <div class="cav" id="note"></div>
 
@@ -33,7 +36,7 @@
     </footer>
   </div>
 
-  <div class="fbar">
+  <div class="fbar" id="bar" hidden>
     <div class="pg"><i id="pgi"></i></div>
     <span id="pgt">0 / 0</span>
     <button id="exp">내보내기</button>
@@ -44,9 +47,11 @@
   <script>
     (function () {
       var D = JSON.parse(document.getElementById('fdata').textContent);
-      var KEY = 'redev-field-v1';
+      // v1 은 공통 체크를 'common' 한 곳에 담아 구역이 달라도 같은 체크가 보였다. 저장 단위를 구역으로 바꾸며 키를 올린다.
+      var KEY = 'redev-field-v2';
       var state = load();
-      var scope = 'common', tab = 'common';
+      var region = null, tab = 'common';
+      var COMMON_N = D.common.reduce(function (a, g) { return a + g.items.length; }, 0);
 
       function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } }
       // 렌더할 때마다 rec() 가 빈 칸을 만들어 두므로, 저장 직전에 체크도 메모도 없는 항목은 털어낸다
@@ -59,29 +64,46 @@
         });
         try { localStorage.setItem(KEY, JSON.stringify(out)); } catch (e) { /* 사파리 시크릿 모드·용량 초과 */ }
       }
-      function bucket(s) { return (state[s] = state[s] || {}); }
-      function rec(s, id) { var b = bucket(s); return (b[id] = b[id] || { c: 0, m: '' }); }
-
-      // 구역 선택 — 공통은 항상 보이고, 구역을 고르면 '이 구역' 탭이 열린다
-      function regionOf(key) { for (var i = 0; i < D.regions.length; i++) if (D.regions[i].key === key) return D.regions[i]; return null; }
-      function items() {
-        if (tab === 'common') return D.common.map(function (g) { return { title: g.id + '. ' + g.title, scope: 'common', items: g.items }; });
-        var r = regionOf(scope);
-        return r ? [{ title: r.name, scope: r.key, items: r.items }] : [];
+      // 저장 단위는 구역이다 — 공통 항목(A1…)도 그 구역 밑에 들어간다.
+      // 답십리489에서 계량기를 센 것이 자양655에서도 세어진 것으로 보이면 안 된다.
+      function rec(id) {
+        var b = (state[region.key] = state[region.key] || {});
+        return (b[id] = b[id] || { c: 0, m: '' });
       }
-
+      function regionOf(key) { for (var i = 0; i < D.regions.length; i++) if (D.regions[i].key === key) return D.regions[i]; return null; }
+      // 칩 배지 — 구역마다 '체크 / 그 구역치 전부'. 어느 구역을 어디까지 봤는지 한 줄로 읽힌다.
+      // rec() 와 달리 빈 칸을 만들지 않는다(선택하지 않은 구역까지 state 에 생기면 저장이 지저분해진다)
+      function chips() {
+        D.regions.forEach(function (r) {
+          var b = state[r.key] || {}, done = 0, all = COMMON_N + r.items.length;
+          Object.keys(b).forEach(function (id) { if (b[id] && b[id].c) done++; });
+          var el = document.querySelector('.fchips a[data-k="' + r.key + '"] small');
+          if (el) el.textContent = done ? done + ' / ' + all : String(all);
+        });
+      }
+      function groups() {
+        return tab === 'common'
+          ? D.common.map(function (g) { return { title: g.id + '. ' + g.title, items: g.items }; })
+          : [{ title: region.name + ' 특이사항', items: region.items }];
+      }
+      function countOf(list) { var d = 0; list.forEach(function (it) { if (rec(it.id).c) d++; }); return d; }
       function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
       function render() {
-        var groups = items(), html = '';
-        if (!groups.length) {
-          html = '<div class="cav">구역을 먼저 고른다. 구역별 항목은 그 구역 md의 <code>## 임장</code> 절에서 온다.</div>';
+        var has = !!region;
+        chips();
+        document.getElementById('body').hidden = !has;
+        document.getElementById('bar').hidden = !has;
+        if (!has) {
+          document.getElementById('note').textContent = '구역을 고르면 그 구역치 체크리스트가 열린다 — 공통 ' + COMMON_N + '항목 + 그 구역만의 특이사항.';
+          return;
         }
-        groups.forEach(function (g) {
+        var html = '';
+        groups().forEach(function (g) {
           html += '<div class="fg"><b>' + esc(g.title) + '</b></div><ul class="fl">';
           g.items.forEach(function (it) {
-            var r = rec(g.scope, it.id), on = !!r.c;
-            html += '<li class="fi' + (on ? ' on' : '') + '" data-s="' + esc(g.scope) + '" data-i="' + esc(it.id) + '">'
+            var r = rec(it.id), on = !!r.c;
+            html += '<li class="fi' + (on ? ' on' : '') + '" data-i="' + esc(it.id) + '">'
               + '<button class="bx" aria-pressed="' + on + '" aria-label="' + esc(it.what) + '"></button>'
               + '<div class="bd"><div class="ti"><i>' + esc(it.id) + '</i>' + esc(it.what) + '</div>'
               + '<details><summary>현장에서 · 왜</summary><p><b>현장에서</b> ' + esc(it.how) + '</p><p><b>왜</b> ' + esc(it.why) + '</p></details>'
@@ -94,25 +116,25 @@
         progress();
       }
 
+      // 진행률은 한 구역치로 센다 — 공통과 특이사항을 합친 것이 그 구역 임장의 전부다
       function progress() {
-        var groups = items(), done = 0, all = 0;
-        groups.forEach(function (g) {
-          g.items.forEach(function (it) { all++; if (rec(g.scope, it.id).c) done++; });
-        });
+        if (!region) return;
+        var cDone = 0;
+        D.common.forEach(function (g) { cDone += countOf(g.items); });
+        var rDone = countOf(region.items), all = COMMON_N + region.items.length, done = cDone + rDone;
+        document.querySelector('.ftabs .cn').textContent = cDone + ' / ' + COMMON_N;
+        document.querySelector('.ftabs .rn').textContent = rDone + ' / ' + region.items.length;
         document.getElementById('pgt').textContent = done + ' / ' + all;
         document.getElementById('pgi').style.width = all ? (100 * done / all).toFixed(1) + '%' : '0';
-        var r = regionOf(scope);
-        document.querySelector('.ftabs .rn').textContent = r ? r.items.length : '—';
-        document.getElementById('note').textContent = r
-          ? r.name + ' — 구역별 ' + r.items.length + '항목. 공통 ' + D.common.reduce(function (a, g) { return a + g.items.length; }, 0) + '항목과 별개로 센다.'
-          : '구역을 고르지 않으면 공통 항목만 본다.';
+        chips();
+        document.getElementById('note').textContent = region.name + ' — 공통 ' + COMMON_N + ' + 특이사항 ' + region.items.length + ' = 이 구역치 ' + all + '항목. 체크·메모는 구역마다 따로 쌓인다.';
       }
 
       // 체크 상자만이 아니라 제목 줄도 탭 대상이다 — 장갑 낀 손으로 28px 상자를 겨누게 하지 않는다
       document.getElementById('panel').addEventListener('click', function (e) {
         var hit = e.target.closest('.bx, .ti');
         if (!hit) return;
-        var li = hit.closest('.fi'), box = li.querySelector('.bx'), r = rec(li.dataset.s, li.dataset.i);
+        var li = hit.closest('.fi'), box = li.querySelector('.bx'), r = rec(li.dataset.i);
         r.c = r.c ? 0 : 1;
         save();
         li.classList.toggle('on', !!r.c);
@@ -127,8 +149,7 @@
       });
       document.getElementById('panel').addEventListener('input', function (e) {
         if (e.target.tagName !== 'TEXTAREA') return;
-        var li = e.target.closest('.fi');
-        rec(li.dataset.s, li.dataset.i).m = e.target.value;
+        rec(e.target.closest('.fi').dataset.i).m = e.target.value;
         save();
       });
 
@@ -142,31 +163,32 @@
       document.querySelectorAll('.fchips a').forEach(function (a) {
         a.addEventListener('click', function (e) {
           e.preventDefault();
-          scope = a.dataset.k;
+          region = regionOf(a.dataset.k);
+          tab = 'common';   // 구역이 바뀌면 그 구역치 공통부터 — 특이사항 탭에 머물러 있으면 시작점을 놓친다
+          document.querySelectorAll('.ftabs button').forEach(function (x) { x.classList.toggle('on', x.dataset.tab === 'common'); });
           document.querySelectorAll('.fchips a').forEach(function (x) { x.classList.toggle('sel', x === a); });
-          if (history.replaceState) history.replaceState(null, '', '?r=' + encodeURIComponent(scope));
-          tab = 'region';
-          document.querySelectorAll('.ftabs button').forEach(function (x) { x.classList.toggle('on', x.dataset.tab === 'region'); });
+          if (history.replaceState) history.replaceState(null, '', '?r=' + encodeURIComponent(a.dataset.k));
           render();
         });
       });
 
-      // 내보내기 — 마크다운. 세션에 붙여넣으면 regions/*.md 의 '## 임장 기록' 으로 커밋된다
+      // 내보내기 — 한 구역치 전부. 세션에 붙여넣으면 그 구역 md 의 '## 임장 기록' 으로 커밋된다
       document.getElementById('exp').addEventListener('click', function () {
-        var r = regionOf(scope), today = new Date().toISOString().slice(0, 10), out = [];
-        out.push('## 임장 기록 — ' + (r ? r.name : '공통') + ' (' + today + ')', '');
-        function block(title, sc, list) {
-          var any = list.filter(function (it) { var x = rec(sc, it.id); return x.c || x.m; });
+        if (!region) return;
+        var today = new Date().toISOString().slice(0, 10), out = [];
+        out.push('## 임장 기록 — ' + region.name + ' (' + today + ')', '');
+        function block(title, list) {
+          var any = list.filter(function (it) { var x = rec(it.id); return x.c || x.m; });
           if (!any.length) return;
           out.push('**' + title + '**', '');
           any.forEach(function (it) {
-            var x = rec(sc, it.id);
+            var x = rec(it.id);
             out.push('- [' + (x.c ? 'x' : ' ') + '] ' + it.id + ' ' + it.what + (x.m ? ' — ' + x.m.replace(/\s*\n\s*/g, ' / ') : ''));
           });
           out.push('');
         }
-        D.common.forEach(function (g) { block('공통 ' + g.id + '. ' + g.title, 'common', g.items); });
-        if (r) block('구역 · ' + r.name, r.key, r.items);
+        D.common.forEach(function (g) { block('공통 ' + g.id + '. ' + g.title, g.items); });
+        block('특이사항 · ' + region.name, region.items);
         if (out.length <= 2) { alert('체크하거나 메모한 항목이 없다.'); return; }
         out.push('출처: 현장 확인 (' + today + ') · 등급: C~D — 계산식에 넣지 않는다');
         var text = out.join('\n');
@@ -176,17 +198,15 @@
       });
 
       document.getElementById('rst').addEventListener('click', function () {
-        var r = regionOf(scope), label = tab === 'common' ? '공통' : (r ? r.name : '이 구역');
-        if (!window.confirm(label + ' 체크와 메모를 지운다. 되돌릴 수 없다.')) return;
-        if (tab === 'common') state.common = {}; else if (r) state[r.key] = {};
+        if (!region) return;
+        if (!window.confirm(region.name + ' 기록을 전부 지운다 (공통 + 특이사항). 되돌릴 수 없다.')) return;
+        state[region.key] = {};
         save(); render();
       });
 
       var pre = (location.search.match(/[?&]r=([^&]+)/) || [])[1];
-      if (pre) {
-        var a = document.querySelector('.fchips a[data-k="' + decodeURIComponent(pre).replace(/"/g, '') + '"]');
-        if (a) a.click(); else render();
-      } else render();
+      var a0 = pre && document.querySelector('.fchips a[data-k="' + decodeURIComponent(pre).replace(/["\\]/g, '') + '"]');
+      if (a0) a0.click(); else render();
     })();
   </script>
 </body>
