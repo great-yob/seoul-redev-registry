@@ -539,7 +539,7 @@ const lead = `서울 ${seoulCount} · 서울 외 ${cards.length - seoulCount} ·
 const chip = (c) => `<a class="chip ${c.style}" href="regions/${nn(c)}.html">${esc(c.name)}${c.unverified ? ' <small>△</small>' : ''}</a>`;
 const stagemap = STAGES.map(([nm, sub], i) => {
   const here = cards.filter((c) => c.stageIdx === i);
-  return `<div class="vrow${here.length ? '' : ' empty'}"><div class="st"><i>${i}</i>${esc(nm)}<small>${esc(sub)}</small></div><div class="ch">${here.map(chip).join('')}</div></div>`;
+  return `<div class="vrow${here.length ? '' : ' empty'}"><div class="st"><i>${i}.</i>${esc(nm)}<small>${esc(sub)}</small></div><div class="ch">${here.map(chip).join('')}</div></div>`;
 }).join('') + (cards.some((c) => c.stageIdx === null) ? `<div class="vrow warn"><div class="st">단계 미분류<small>키워드 표 갱신 필요</small></div><div class="ch">${cards.filter((c) => c.stageIdx === null).map(chip).join('')}</div></div>` : '');
 
 const pillsHtml = pills.map((p) => `<details class="pill"><summary>${p.short}</summary><p>${esc(p.detail)}</p></details>`).join('');
