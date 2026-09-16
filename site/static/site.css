@@ -241,6 +241,54 @@ ul.chain li { margin: 3px 0; }
 .pn { display: flex; justify-content: space-between; gap: 12px; margin-top: 22px; font-size: 13px; }
 .pn a { color: var(--accent); padding: 8px 0; min-height: 40px; display: inline-flex; align-items: center; }
 
+/* 섹션 헤더 — 템플릿은 <span>제목</span><em>보조</em>, 메인 그룹은 <b>제목</b><span>보조</span>.
+   .sec 를 대체하면서 em 규칙과 위 여백이 같이 넘어오지 않아 보조문구가 본문 크기 이탤릭으로 떴다. */
+.grp-h { margin: 22px 0 6px; }
+.grp > .grp-h { margin-top: 0; }
+.grp-h em { font-style: normal; letter-spacing: 0; font-weight: 400; font-size: 11px; color: var(--ink-3); min-width: 0; }
+.grp-h em a { color: var(--accent); }
+
+/* ---------------------------------------------------------------- 임장 체크 (field.html)
+   현장에서 서서 한 손으로 쓴다 — 탭 대상은 크게, 기본 화면은 제목만, 근거는 접힘 안에. */
+.fpage .wrap { padding-bottom: 96px; }
+.fchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fchips a { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; padding: 6px 11px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line-2); color: var(--ink-2); min-height: 34px; }
+.fchips a small { font-size: 10px; color: var(--ink-3); background: var(--surface-2); border-radius: 99px; padding: 1px 6px; font-variant-numeric: tabular-nums; }
+.fchips a.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
+.fchips a.sel small { background: rgba(255, 255, 255, .22); color: #fff; }
+.ftabs { display: flex; gap: 6px; margin: 16px 0 10px; }
+.ftabs button { flex: 1; font: inherit; font-size: 13px; padding: 9px 8px; min-height: 44px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.ftabs button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); font-weight: 700; }
+.ftabs button b { font-variant-numeric: tabular-nums; }
+.fg { font-size: 11px; letter-spacing: .05em; color: var(--ink-3); margin: 18px 0 6px; }
+.fg b { font-weight: 700; color: var(--ink-2); }
+.fl { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.fi { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 11px; padding: 11px 13px; border-bottom: 1px solid var(--line); align-items: start; }
+.fi:last-child { border-bottom: 0; }
+.fi.on { background: var(--ok-bg); }
+.fi .bx { width: 28px; height: 28px; margin: -1px 0 0 -1px; border-radius: 7px; border: 2px solid var(--line-2); background: var(--surface); cursor: pointer; padding: 0; display: grid; place-items: center; }
+.fi.on .bx { background: var(--ok-ink); border-color: var(--ok-ink); }
+.fi.on .bx::after { content: "¹3"; color: var(--surface); font-size: 16px; font-weight: 700; line-height: 1; }
+.fi .ti { font-size: 14px; line-height: 1.4; color: var(--ink); cursor: pointer; }
+.fi.on .ti { color: var(--ok-ink); }
+.fi .ti i { font-style: normal; font-size: 10.5px; font-weight: 700; color: var(--ink-3); margin-right: 6px; font-variant-numeric: tabular-nums; }
+.fi.on .ti i { color: var(--ok-ink); opacity: .7; }
+.fi details { margin-top: 3px; }
+.fi summary { list-style: none; cursor: pointer; font-size: 11.5px; color: var(--accent); padding: 4px 0; min-height: 26px; }
+.fi summary::-webkit-details-marker { display: none; }
+.fi summary::before { content: "+ "; }
+.fi details[open] summary::before { content: "2 "; }
+.fi details p { margin: 4px 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.55; }
+.fi details p b { color: var(--ink-3); font-weight: 600; font-size: 11px; margin-right: 4px; }
+.fi textarea { display: block; width: 100%; margin-top: 7px; font: inherit; font-size: 13px; line-height: 1.5; color: var(--ink); background: var(--surface); border: 1px solid var(--line-2); border-radius: 7px; padding: 7px 9px; resize: vertical; }
+.fpanel code, footer code { background: var(--surface-2); padding: 1px 4px; border-radius: 3px; font-size: .92em; }
+.fbar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 10px 16px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line-2); }
+.fbar .pg { flex: 1; min-width: 40px; height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.fbar .pg i { display: block; height: 100%; width: 0; background: var(--ok-ink); }
+.fbar > span { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fbar button { font: inherit; font-size: 12.5px; padding: 8px 12px; min-height: 42px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; white-space: nowrap; }
+.fbar button.gh { background: transparent; color: var(--ink-3); border-color: var(--line-2); }
+
 @media (min-width: 720px) {
   .wrap { padding: 32px 24px 80px; }
   h1 { font-size: 26px; }

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>임장 체크 · 서울 재개발 구역 레지스트리</title>
+  <meta name="description" content="현장에서만 확인되는 것만. 공통 {{FIELD_COUNT}}항목 + 구역별 특이사항. 체크와 메모는 이 브라우저에만 저장된다.">
+  <link rel="stylesheet" href="site.css">
+</head>
+
+<body class="fpage">
+  <div class="wrap narrow">
+    <div class="eyebrow"><a href="index.html">← 전체</a> · 공통 {{FIELD_VERSION}} · {{FIELD_UPDATED}}</div>
+    <h1>임장 체크</h1>
+
+    <div class="grp-h"><span>구역</span><em>탭하면 그 구역 항목이 붙는다</em></div>
+    <div class="fchips">{{CHIPS}}</div>
+
+    <div class="ftabs" role="tablist">
+      <button role="tab" data-tab="common" class="on">공통 <b>{{FIELD_COUNT}}</b></button>
+      <button role="tab" data-tab="region">이 구역 <b class="rn">—</b></button>
+    </div>
+
+    <div class="fpanel" id="panel"></div>
+
+    <div class="cav" id="note"></div>
+
+    <footer>
+      <span>공통 원본 <a href="https://github.com/{{REPO}}/blob/main/30_FIELD_CHECKLIST.md" target="_blank"
+          rel="noopener">30_FIELD_CHECKLIST.md</a> · 구역별은 각 구역 md의 <code>## 임장</code> 절</span>
+      <span><br>체크·메모는 <b>이 브라우저에만</b> 저장된다. 다른 기기·다른 사람에게는 보이지 않고, 캐시를 비우면 사라진다.<br>임장이 끝나면 <b>내보내기</b>를 눌러 기록을 남긴다.</span>
+    </footer>
+  </div>
+
+  <div class="fbar">
+    <div class="pg"><i id="pgi"></i></div>
+    <span id="pgt">0 / 0</span>
+    <button id="exp">내보내기</button>
+    <button id="rst" class="gh">초기화</button>
+  </div>
+
+  <script type="application/json" id="fdata">{{DATA}}</script>
+  <script>
+    (function () {
+      var D = JSON.parse(document.getElementById('fdata').textContent);
+      var KEY = 'redev-field-v1';
+      var state = load();
+      var scope = 'common', tab = 'common';
+
+      function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } }
+      // 렌더할 때마다 rec() 가 빈 칸을 만들어 두므로, 저장 직전에 체크도 메모도 없는 항목은 털어낸다
+      function save() {
+        var out = {};
+        Object.keys(state).forEach(function (s) {
+          var b = {};
+          Object.keys(state[s] || {}).forEach(function (id) { var x = state[s][id]; if (x && (x.c || x.m)) b[id] = x; });
+          if (Object.keys(b).length) out[s] = b;
+        });
+        try { localStorage.setItem(KEY, JSON.stringify(out)); } catch (e) { /* 사파리 시크릿 모드·용량 초과 */ }
+      }
+      function bucket(s) { return (state[s] = state[s] || {}); }
+      function rec(s, id) { var b = bucket(s); return (b[id] = b[id] || { c: 0, m: '' }); }
+
+      // 구역 선택 — 공통은 항상 보이고, 구역을 고르면 '이 구역' 탭이 열린다
+      function regionOf(key) { for (var i = 0; i < D.regions.length; i++) if (D.regions[i].key === key) return D.regions[i]; return null; }
+      function items() {
+        if (tab === 'common') return D.common.map(function (g) { return { title: g.id + '. ' + g.title, scope: 'common', items: g.items }; });
+        var r = regionOf(scope);
+        return r ? [{ title: r.name, scope: r.key, items: r.items }] : [];
+      }
+
+      function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+      function render() {
+        var groups = items(), html = '';
+        if (!groups.length) {
+          html = '<div class="cav">구역을 먼저 고른다. 구역별 항목은 그 구역 md의 <code>## 임장</code> 절에서 온다.</div>';
+        }
+        groups.forEach(function (g) {
+          html += '<div class="fg"><b>' + esc(g.title) + '</b></div><ul class="fl">';
+          g.items.forEach(function (it) {
+            var r = rec(g.scope, it.id), on = !!r.c;
+            html += '<li class="fi' + (on ? ' on' : '') + '" data-s="' + esc(g.scope) + '" data-i="' + esc(it.id) + '">'
+              + '<button class="bx" aria-pressed="' + on + '" aria-label="' + esc(it.what) + '"></button>'
+              + '<div class="bd"><div class="ti"><i>' + esc(it.id) + '</i>' + esc(it.what) + '</div>'
+              + '<details><summary>현장에서 · 왜</summary><p><b>현장에서</b> ' + esc(it.how) + '</p><p><b>왜</b> ' + esc(it.why) + '</p></details>'
+              + ((on || r.m) ? '<textarea rows="2" placeholder="확인한 내용을 적는다">' + esc(r.m) + '</textarea>' : '')
+              + '</div></li>';
+          });
+          html += '</ul>';
+        });
+        document.getElementById('panel').innerHTML = html;
+        progress();
+      }
+
+      function progress() {
+        var groups = items(), done = 0, all = 0;
+        groups.forEach(function (g) {
+          g.items.forEach(function (it) { all++; if (rec(g.scope, it.id).c) done++; });
+        });
+        document.getElementById('pgt').textContent = done + ' / ' + all;
+        document.getElementById('pgi').style.width = all ? (100 * done / all).toFixed(1) + '%' : '0';
+        var r = regionOf(scope);
+        document.querySelector('.ftabs .rn').textContent = r ? r.items.length : '—';
+        document.getElementById('note').textContent = r
+          ? r.name + ' — 구역별 ' + r.items.length + '항목. 공통 ' + D.common.reduce(function (a, g) { return a + g.items.length; }, 0) + '항목과 별개로 센다.'
+          : '구역을 고르지 않으면 공통 항목만 본다.';
+      }
+
+      // 체크 상자만이 아니라 제목 줄도 탭 대상이다 — 장갑 낀 손으로 28px 상자를 겨누게 하지 않는다
+      document.getElementById('panel').addEventListener('click', function (e) {
+        var hit = e.target.closest('.bx, .ti');
+        if (!hit) return;
+        var li = hit.closest('.fi'), box = li.querySelector('.bx'), r = rec(li.dataset.s, li.dataset.i);
+        r.c = r.c ? 0 : 1;
+        save();
+        li.classList.toggle('on', !!r.c);
+        box.setAttribute('aria-pressed', !!r.c);
+        var ta = li.querySelector('textarea');
+        if (r.c && !ta) {
+          ta = document.createElement('textarea');
+          ta.rows = 2; ta.placeholder = '확인한 내용을 적는다';
+          li.querySelector('.bd').appendChild(ta);   // 자동 포커스는 하지 않는다 — 연속 체크 중 키보드가 튀어오른다
+        } else if (!r.c && ta && !ta.value.trim()) ta.remove();
+        progress();
+      });
+      document.getElementById('panel').addEventListener('input', function (e) {
+        if (e.target.tagName !== 'TEXTAREA') return;
+        var li = e.target.closest('.fi');
+        rec(li.dataset.s, li.dataset.i).m = e.target.value;
+        save();
+      });
+
+      document.querySelectorAll('.ftabs button').forEach(function (b) {
+        b.addEventListener('click', function () {
+          tab = b.dataset.tab;
+          document.querySelectorAll('.ftabs button').forEach(function (x) { x.classList.toggle('on', x === b); });
+          render();
+        });
+      });
+      document.querySelectorAll('.fchips a').forEach(function (a) {
+        a.addEventListener('click', function (e) {
+          e.preventDefault();
+          scope = a.dataset.k;
+          document.querySelectorAll('.fchips a').forEach(function (x) { x.classList.toggle('sel', x === a); });
+          if (history.replaceState) history.replaceState(null, '', '?r=' + encodeURIComponent(scope));
+          tab = 'region';
+          document.querySelectorAll('.ftabs button').forEach(function (x) { x.classList.toggle('on', x.dataset.tab === 'region'); });
+          render();
+        });
+      });
+
+      // 내보내기 — 마크다운. 세션에 붙여넣으면 regions/*.md 의 '## 임장 기록' 으로 커밋된다
+      document.getElementById('exp').addEventListener('click', function () {
+        var r = regionOf(scope), today = new Date().toISOString().slice(0, 10), out = [];
+        out.push('## 임장 기록 — ' + (r ? r.name : '공통') + ' (' + today + ')', '');
+        function block(title, sc, list) {
+          var any = list.filter(function (it) { var x = rec(sc, it.id); return x.c || x.m; });
+          if (!any.length) return;
+          out.push('**' + title + '**', '');
+          any.forEach(function (it) {
+            var x = rec(sc, it.id);
+            out.push('- [' + (x.c ? 'x' : ' ') + '] ' + it.id + ' ' + it.what + (x.m ? ' — ' + x.m.replace(/\s*\n\s*/g, ' / ') : ''));
+          });
+          out.push('');
+        }
+        D.common.forEach(function (g) { block('공통 ' + g.id + '. ' + g.title, 'common', g.items); });
+        if (r) block('구역 · ' + r.name, r.key, r.items);
+        if (out.length <= 2) { alert('체크하거나 메모한 항목이 없다.'); return; }
+        out.push('출처: 현장 확인 (' + today + ') · 등급: C~D — 계산식에 넣지 않는다');
+        var text = out.join('\n');
+        var done = function () { alert('복사했다. 세션에 붙여넣으면 기록으로 커밋된다.'); };
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () { window.prompt('복사해서 세션에 붙여넣는다', text); });
+        else window.prompt('복사해서 세션에 붙여넣는다', text);
+      });
+
+      document.getElementById('rst').addEventListener('click', function () {
+        var r = regionOf(scope), label = tab === 'common' ? '공통' : (r ? r.name : '이 구역');
+        if (!window.confirm(label + ' 체크와 메모를 지운다. 되돌릴 수 없다.')) return;
+        if (tab === 'common') state.common = {}; else if (r) state[r.key] = {};
+        save(); render();
+      });
+
+      var pre = (location.search.match(/[?&]r=([^&]+)/) || [])[1];
+      if (pre) {
+        var a = document.querySelector('.fchips a[data-k="' + decodeURIComponent(pre).replace(/"/g, '') + '"]');
+        if (a) a.click(); else render();
+      } else render();
+    })();
+  </script>
+</body>
+
+</html>
