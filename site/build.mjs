@@ -119,6 +119,9 @@ const fieldMd = read(FIELD_FILE);
 const fieldHead = fieldMd.match(/\*\*버전\*\* (v[\d.]+) \| \*\*갱신\*\* (\d{4}-\d{2}-\d{2})/);
 if (!fieldHead) fail(`${FIELD_FILE}: 헤더에서 '**버전** vX.Y | **갱신** YYYY-MM-DD' 를 읽지 못했다`);
 const fieldLines = fieldMd.split('\n');
+const fieldRulesTable = tableAfter(fieldLines, /^## 임장 규칙/, `${FIELD_FILE} 규칙`);
+if (!fieldRulesTable) warn(`${FIELD_FILE}: '## 임장 규칙' 절 아래 표가 없다 — 페이지 맨 위 규칙 블록이 빈다`);
+const fieldRules = fieldRulesTable ? visitRows(fieldRulesTable, `${FIELD_FILE} 규칙`) : [];
 const fieldGroups = [];
 fieldLines.forEach((l, i) => {
   const m = l.match(/^## ([A-Z])\. (.+)$/);
@@ -133,7 +136,7 @@ if (!fieldGroups.length) fail(`${FIELD_FILE}: '## A. 제목' 그룹을 하나도
 const fieldCount = fieldGroups.reduce((a, g) => a + g.items.length, 0);
 const fieldIds = fieldGroups.flatMap((g) => g.items.map((it) => it.id));
 if (new Set(fieldIds).size !== fieldIds.length) warn(`${FIELD_FILE}: 그룹을 가로질러 ID 가 중복된다`);
-const fieldDeclared = Number((fieldMd.match(/\*\*항목 수\*\* (\d+)/) || [])[1]);
+const fieldDeclared = Number((fieldMd.match(/\*\*항목 수\*\*[^\d]*(\d+)/) || [])[1]);
 if (fieldDeclared && fieldDeclared !== fieldCount) warn(`${FIELD_FILE}: 헤더 항목 수 ${fieldDeclared} ≠ 실제 ${fieldCount}`);
 
 // ---------------------------------------------------------------- regions/*.md
@@ -764,7 +767,7 @@ function regionPage(c, i) {
     const top = ls.items.slice(0, 3);
     const src = ls.noteLinks[0];
     const line = [ls.date ? `수집 ${ls.date}` : null, ls.total ? `예산 통과 ${ls.count} / ${ls.total}건` : null, ls.priceRange ? `구역 호가 ${ls.priceRange}억` : null].filter(Boolean).join(' · ');
-    const head = `<div class="grp-h"><span>매수 후보 · 호가 <i class="grade d">D</i></span><em>${src ? `<a href="${esc(src.url)}" target="_blank" rel="noopener">${esc(src.label)}</a> · ` : ''}${top.length ? `상위 ${top.length}` : '0건'}</em></div>`;
+    const head = `<div class="grp-h"><b>매수 후보 · 호가 <i class="grade d">D</i></b><em>${src ? `<a href="${esc(src.url)}" target="_blank" rel="noopener">${esc(src.label)}</a> · ` : ''}${top.length ? `상위 ${top.length}` : '0건'}</em></div>`;
     if (!top.length) return head + `<div class="cav">${esc(line || cut(ls.note, 120))}</div>`;
     // 링크 셀에 '모바일' 링크가 있으면 따로 그리지 않고 네이버 링크의 data-m 으로 붙인다 — 페이지 스크립트가 모바일 UA에서 href 를 바꾼다
     const linkHtml = (links) => {
@@ -810,7 +813,12 @@ function regionPage(c, i) {
 // ---------------------------------------------------------------- 임장 페이지
 const visitless = cards.filter((c) => !c.visit.length);
 if (visitless.length) warn(`## 임장 절이 없는 구역: ${visitless.map((c) => c.no + ' ' + c.name).join(' · ')}`);
-const fieldChips = cards.map((c) => `<a href="field.html?r=${encodeURIComponent(c.key)}" data-k="${esc(c.key)}">${esc(c.name)}<small>${c.visit.length}</small></a>`).join('');
+// 칩 배지는 그 구역치 전부(공통 + 특이사항)다. 특이사항 수만 적으면 구역 임장이 7항목짜리로 보인다.
+// 페이지가 열리면 JS 가 '체크 / 전체' 로 덮어쓴다.
+const fieldChips = cards.map((c) => `<a href="field.html?r=${encodeURIComponent(c.key)}" data-k="${esc(c.key)}">${esc(c.name)}<small>${fieldCount + c.visit.length}</small></a>`).join('');
+const fieldRulesHtml = fieldRules.length
+  ? `<div class="frules"><b>임장 규칙</b><ul>${fieldRules.map((it) => `<li><i>${esc(it.what)}</i> ${esc(it.how)}<span>${esc(it.why)}</span></li>`).join('')}</ul></div>`
+  : '';
 const fieldData = {
   common: fieldGroups,
   regions: cards.filter((c) => c.visit.length).map((c) => ({ key: c.key, no: c.no, name: c.name, items: c.visit })),
@@ -823,11 +831,11 @@ const common = { VERSION: registry.version, UPDATED: registry.updated, COUNT: St
 writeFileSync(path.join(OUT, 'index.html'), fill(readFileSync(path.join(TPL, 'index.html'), 'utf8'), { ...common, LEAD: esc(lead), STAGEMAP: stagemap, PILLS: pillsHtml, GROUPS: groupsHtml }));
 writeFileSync(path.join(OUT, 'docs.html'), fill(readFileSync(path.join(TPL, 'docs.html'), 'utf8'), { ...common, TABS: tabsHtml, PANELS: panelsHtml, MD_BLOCKS: mdBlocks }));
 writeFileSync(path.join(OUT, 'field.html'), fill(readFileSync(path.join(TPL, 'field.html'), 'utf8'), {
-  ...common, FIELD_VERSION: fieldHead[1], FIELD_UPDATED: fieldHead[2], FIELD_COUNT: String(fieldCount), CHIPS: fieldChips,
+  ...common, FIELD_VERSION: fieldHead[1], FIELD_UPDATED: fieldHead[2], FIELD_COUNT: String(fieldCount), CHIPS: fieldChips, RULES: fieldRulesHtml,
   DATA: JSON.stringify(fieldData).replace(/</g, '\\u003c'),
 }));
 cards.forEach((c, i) => writeFileSync(path.join(OUT, 'regions', nn(c) + '.html'), regionPage(c, i)));
-writeFileSync(path.join(OUT, 'data.json'), JSON.stringify({ registry, built, warnings, rules: { ltv: LTV, caps: CAPS, fee: !!feeText }, stages: STAGES.map((s) => s[0]), pills, cards, hidden, questions: shownQuestions, field: { version: fieldHead[1], updated: fieldHead[2], count: fieldCount, groups: fieldGroups } }, null, 2));
+writeFileSync(path.join(OUT, 'data.json'), JSON.stringify({ registry, built, warnings, rules: { ltv: LTV, caps: CAPS, fee: !!feeText }, stages: STAGES.map((s) => s[0]), pills, cards, hidden, questions: shownQuestions, field: { version: fieldHead[1], updated: fieldHead[2], count: fieldCount, rules: fieldRules, groups: fieldGroups } }, null, 2));
 if (existsSync(path.join(ROOT, 'site', 'static'))) for (const f of readdirSync(path.join(ROOT, 'site', 'static'))) writeFileSync(path.join(OUT, f), readFileSync(path.join(ROOT, 'site', 'static', f)));
 
-console.log(`ok  ${registry.version} · ${cards.length}개 구역 · 임장 공통 ${fieldCount} + 구역별 ${cards.reduce((a, c) => a + c.visit.length, 0)}${hidden.length ? ` · 숨김 ${hidden.map((h) => h.no + ' ' + h.name).join(' · ')}` : ''} · ${GROUPS.map(([, t, , pred]) => `${t} ${cards.filter(pred).length}`).filter((s) => !/ 0$/.test(s)).join(' / ')} · 미해결 ${openUnique} · 경고 ${warnings.length}`);
+console.log(`ok  ${registry.version} · ${cards.length}개 구역 · 임장 공통 ${fieldCount}(+규칙 ${fieldRules.length}) + 구역별 ${cards.reduce((a, c) => a + c.visit.length, 0)}${hidden.length ? ` · 숨김 ${hidden.map((h) => h.no + ' ' + h.name).join(' · ')}` : ''} · ${GROUPS.map(([, t, , pred]) => `${t} ${cards.filter(pred).length}`).filter((s) => !/ 0$/.test(s)).join(' / ')} · 미해결 ${openUnique} · 경고 ${warnings.length}`);
