@@ -825,7 +825,7 @@ if (visitless.length) warn(`## 임장 절이 없는 구역: ${visitless.map((c) 
 // 페이지가 열리면 JS 가 '체크 / 전체' 로 덮어쓴다.
 const fieldChips = cards.map((c) => `<a href="field.html?r=${encodeURIComponent(c.key)}" data-k="${esc(c.key)}">${esc(c.name)}<small>${fieldCount + c.visit.length}</small></a>`).join('');
 const fieldRulesHtml = fieldRules.length
-  ? `<div class="frules"><b>임장 규칙</b><ul>${fieldRules.map((it) => `<li><i>${esc(it.what)}</i> ${esc(it.how)}<span>${esc(it.why)}</span></li>`).join('')}</ul></div>`
+  ? `<div class="grp-h"><b>임장 규칙</b></div><div class="frules"><ul>${fieldRules.map((it) => `<li><i>${esc(it.what)}</i> ${esc(it.how)}<span>${esc(it.why)}</span></li>`).join('')}</ul></div>`
   : '';
 const fieldData = {
   common: fieldGroups,
