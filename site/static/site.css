@@ -66,17 +66,19 @@ h1 { font-size: 22px; font-weight: 700; line-height: 1.25; margin: 2px 0 12px; t
 .num.rng b { font-size: 13.5px; }
 .num.na b { color: var(--ink-3); font-weight: 500; font-size: 12.5px; }
 .lead { font-size: 12.5px; color: var(--ink-3); margin: -6px 0 6px; }
-footer { margin-top: 32px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 4px 14px; }
+footer { margin-top: 32px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }
+footer span { display: block; }
 footer a { color: var(--accent); }
 
 /* 메인 */
 .vmap { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-.vrow { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); align-items: start; }
+.vrow { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); align-items: start; }
 .vrow:last-child { border-bottom: 0; }
 .vrow .st { font-size: 12.5px; font-weight: 700; line-height: 1.3; }
+.vrow .st i { font-style: normal; font-weight: 500; color: var(--ink-3); margin-right: 5px; font-variant-numeric: tabular-nums; }
 .vrow .st small { display: block; font-weight: 400; color: var(--ink-3); font-size: 10.5px; }
 .vrow .ch { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
-.vrow.empty { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--surface-2) 6px 7px); }
+.vrow.empty { background: transparent; }
 .vrow.empty .st { color: var(--ink-3); font-weight: 500; }
 .vrow.warn { background: var(--warn-bg); }
 .pills { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -276,7 +278,7 @@ ul.chain li { margin: 3px 0; }
 .fi.on { background: var(--ok-bg); }
 .fi .bx { width: 28px; height: 28px; margin: -1px 0 0 -1px; border-radius: 7px; border: 2px solid var(--line-2); background: var(--surface); cursor: pointer; padding: 0; display: grid; place-items: center; }
 .fi.on .bx { background: var(--ok-ink); border-color: var(--ok-ink); }
-.fi.on .bx::after { content: "¹3"; color: var(--surface); font-size: 16px; font-weight: 700; line-height: 1; }
+.fi.on .bx::after { content: ""; width: 11px; height: 6px; margin-top: -3px; border: 2px solid var(--surface); border-top: 0; border-right: 0; transform: rotate(-45deg); }
 .fi .ti { font-size: 14px; line-height: 1.4; color: var(--ink); cursor: pointer; }
 .fi.on .ti { color: var(--ok-ink); }
 .fi .ti i { font-style: normal; font-size: 10.5px; font-weight: 700; color: var(--ink-3); margin-right: 6px; font-variant-numeric: tabular-nums; }
@@ -285,7 +287,7 @@ ul.chain li { margin: 3px 0; }
 .fi summary { list-style: none; cursor: pointer; font-size: 11.5px; color: var(--accent); padding: 4px 0; min-height: 26px; }
 .fi summary::-webkit-details-marker { display: none; }
 .fi summary::before { content: "+ "; }
-.fi details[open] summary::before { content: "2 "; }
+.fi details[open] summary::before { content: "− "; }
 .fi details p { margin: 4px 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.55; }
 .fi details p b { color: var(--ink-3); font-weight: 600; font-size: 11px; margin-right: 4px; }
 .fi textarea { display: block; width: 100%; margin-top: 7px; font: inherit; font-size: 13px; line-height: 1.5; color: var(--ink); background: var(--surface); border: 1px solid var(--line-2); border-radius: 7px; padding: 7px 9px; resize: vertical; }
@@ -300,7 +302,7 @@ ul.chain li { margin: 3px 0; }
 @media (min-width: 720px) {
   .wrap { padding: 32px 24px 80px; }
   h1 { font-size: 26px; }
-  .vrow { grid-template-columns: 200px minmax(0, 1fr); }
+  .vrow { grid-template-columns: minmax(0, 1fr) 320px; }
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .vs { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
   .vs li { padding: 22px 4px 0; text-align: center; font-size: 12px; }
