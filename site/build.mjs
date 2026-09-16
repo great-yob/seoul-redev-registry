@@ -569,11 +569,11 @@ function card(c) {
 }
 // 그룹은 단계 구간. 순위표가 아니다 — 같은 그룹 안에서도 번호순.
 const GROUPS = [
-  ['early', '정비구역 지정 전', '구역계 · 기준일 확정 전 · 소멸 리스크', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx <= 2],
-  ['mid', '지정 후 · 관리처분 전', '분양가 · 권리가액은 감정평가 전', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx >= 3 && c.stageIdx <= 5],
-  ['late', '관리처분 이후', '입주권 성격 · 재인가 대기', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx >= 6],
-  ['unk', '단계 미분류', '', (c) => c.seoul !== false && c.stageIdx === null],
-  ['out', '서울 외', '같은 표에 안 세움', (c) => c.seoul === false],
+  ['early', '정비구역 지정 전', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx <= 2],
+  ['mid', '지정 후 · 관리처분 전', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx >= 3 && c.stageIdx <= 5],
+  ['late', '관리처분 이후', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx >= 6],
+  ['unk', '단계 미분류', (c) => c.seoul !== false && c.stageIdx === null],
+  ['out', '서울 외', (c) => c.seoul === false],
 ];
 const groupsHtml = GROUPS.map(([g, title, sub, pred]) => {
   const cs = cards.filter(pred);
@@ -730,9 +730,9 @@ function listFold(c) {
 function regionPage(c, i) {
   const r = byNo.get(c.no);
   const facts = [c.district, c.method, c.households ? `<b>${esc(c.households)}</b>` : null, c.area ? esc(c.area) : null,
-    c.baseDate ? `기준일 <b>${esc(c.baseDate)}</b>${badge(c.baseDateGrade)}` : null, c.contractor ? `시공사 <b>${esc(c.contractor)}</b>` : null,
-    c.moveIn ? `입주 <b>${esc(c.moveIn.text)}</b>${badge(c.moveIn.grade)}` : null, c.nameNote ? esc(c.nameNote) : null,
-    c.mapAddr ? `<a class="map" href="https://map.naver.com/p/search/${encodeURIComponent(c.mapAddr)}" target="_blank" rel="noopener">지도 ↗</a>` : null]
+  c.baseDate ? `기준일 <b>${esc(c.baseDate)}</b>${badge(c.baseDateGrade)}` : null, c.contractor ? `시공사 <b>${esc(c.contractor)}</b>` : null,
+  c.moveIn ? `입주 <b>${esc(c.moveIn.text)}</b>${badge(c.moveIn.grade)}` : null, c.nameNote ? esc(c.nameNote) : null,
+  c.mapAddr ? `<a class="map" href="https://map.naver.com/p/search/${encodeURIComponent(c.mapAddr)}" target="_blank" rel="noopener">지도 ↗</a>` : null]
     .filter(Boolean).map((x) => `<span>${x}</span>`).join('');
   const axis = axisOf(c.method);
   const steps = AXES[axis];
@@ -748,7 +748,7 @@ function regionPage(c, i) {
   }).join('');
   const p = c.price;
   const entry = [p.cash ? `초기 현금 <b>${esc(p.cash.text)}억</b>` : '초기 현금 —', p.gapFund ? `갭 기준 ${esc(p.gapFund)}억 참고` : null,
-    c.toheo === '비대상' ? '토허 비대상' : c.toheo === '대상' ? '토허 허가 · 2년 실거주' : '토허 미확인'].filter(Boolean).join(' · ');
+  c.toheo === '비대상' ? '토허 비대상' : c.toheo === '대상' ? '토허 허가 · 2년 실거주' : '토허 미확인'].filter(Boolean).join(' · ');
   const openQs = questions.filter((q) => c.openIds.includes(q.id));
   const qLines = openQs.slice(0, 3).map((q) => `<span><b>${esc(q.id)}</b> ${esc(q.what)}</span>`).join('') + (openQs.length > 3 ? `<span class="etc">외 ${openQs.length - 3}건 — 아래 '확인 중인 질문'</span>` : '');
   const riskHtml = c.riskFirst || c.riskLead
