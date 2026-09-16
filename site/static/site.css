@@ -264,8 +264,7 @@ ul.chain li { margin: 3px 0; }
    현장에서 서서 한 손으로 쓴다 — 탭 대상은 크게, 기본 화면은 제목만, 근거는 접힘 안에. */
 .fpage .wrap { padding-bottom: 96px; }
 [hidden] { display: none !important; }
-.frules { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: 9px 13px; margin: 2px 0 0; }
-.frules > b { display: block; font-size: 11px; letter-spacing: .05em; color: var(--ink-3); margin-bottom: 4px; }
+.frules { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: 9px 13px; margin: 0; }
 .frules ul { list-style: none; margin: 0; padding: 0; }
 .frules li { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); padding: 4px 0; }
 .frules li + li { border-top: 1px solid var(--line); }
