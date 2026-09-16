@@ -11,18 +11,18 @@
 
 <body class="fpage">
   <div class="wrap narrow">
-    <div class="eyebrow"><a href="index.html">← 전체</a> · 공통 {{FIELD_VERSION}} · {{FIELD_UPDATED}}</div>
-    <h1>임장 체크</h1>
+    <div class="eyebrow"><a href="index.html">← 전체</a> · 공통사항 {{FIELD_VERSION}} · {{FIELD_UPDATED}}</div>
+    <h1>임장 체크리스트</h1>
 
     {{RULES}}
 
-    <div class="grp-h"><b>어느 구역</b><em>한 번에 한 구역</em></div>
+    <div class="grp-h"><b>임장 구역</b></div>
     <div class="fchips">{{CHIPS}}</div>
 
     <div id="body" hidden>
       <div class="ftabs" role="tablist">
-        <button role="tab" data-tab="common" class="on">공통 <b class="cn">—</b></button>
-        <button role="tab" data-tab="region">이 구역만 <b class="rn">—</b></button>
+        <button role="tab" data-tab="common" class="on">공통사항 <b class="cn">—</b></button>
+        <button role="tab" data-tab="region">구역 특이사항 <b class="rn">—</b></button>
       </div>
       <div class="fpanel" id="panel"></div>
     </div>
@@ -30,9 +30,9 @@
     <div class="cav" id="note"></div>
 
     <footer>
-      <span>공통 원본 <a href="https://github.com/{{REPO}}/blob/main/30_FIELD_CHECKLIST.md" target="_blank"
-          rel="noopener">30_FIELD_CHECKLIST.md</a> · 구역별은 각 구역 md의 <code>## 임장</code> 절</span>
-      <span><br>체크·메모는 <b>이 브라우저에만</b> 저장된다. 다른 기기·다른 사람에게는 보이지 않고, 캐시를 비우면 사라진다.<br>임장이 끝나면 <b>내보내기</b>를 눌러 기록을 남긴다.</span>
+      <span>원문보기 <a href="https://github.com/{{REPO}}/blob/main/30_FIELD_CHECKLIST.md" target="_blank"
+          rel="noopener">원본문서-공통사항</a></span>
+      <span><br>체크·메모는 <b>이 브라우저에만</b> 저장된다.<br>임장이 끝나면 <b>내보내기</b>로 기록을 커밋해야 한다.</span>
     </footer>
   </div>
 
