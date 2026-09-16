@@ -139,6 +139,46 @@ if (new Set(fieldIds).size !== fieldIds.length) warn(`${FIELD_FILE}: 그룹을 �
 const fieldDeclared = Number((fieldMd.match(/\*\*항목 수\*\*[^\d]*(\d+)/) || [])[1]);
 if (fieldDeclared && fieldDeclared !== fieldCount) warn(`${FIELD_FILE}: 헤더 항목 수 ${fieldDeclared} ≠ 실제 ${fieldCount}`);
 
+// 커밋된 체크·메모 — `data/field/*.jsonl` 이 원본이다.
+// md `## 임장 기록` 절은 사람이 읽는 회차 archive 이고(항목 문구까지 보존), 페이지가 **상태**로 쓰는 것은 이 jsonl 이다.
+// 항목별 체크·메모가 기계 형식으로 있는 곳은 여기뿐이라, 기기가 달라도 같은 상태를 본다.
+// 회차 순서(파일=날짜 오름차순, 파일 안은 적재 순서)대로 덮어써 구역별 **누적 상태**를 만든다 — 같은 ID 를 다시 봤으면 나중 회차가 이긴다.
+function loadFieldHistory() {
+  const dir = path.join(ROOT, 'data', 'field');
+  const base = {};   // { 구역key: { ID: { c, m, date, issue } } }
+  if (!existsSync(dir)) return base;
+  for (const f of readdirSync(dir).filter((x) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(x)).sort()) {
+    readFileSync(path.join(dir, f), 'utf8').split('\n').forEach((line, i) => {
+      if (!line.trim()) return;
+      let r;
+      try { r = JSON.parse(line); } catch { warn(`data/field/${f}:${i + 1} 행이 JSON 이 아니다 — 건너뛴다`); return; }
+      if (r.t !== 'item' || !r.zone || !r.id) return;   // `visit` 행(회차 머리)은 md 쪽에서 센다
+      const b = (base[r.zone] = base[r.zone] || {});
+      b[r.id] = { c: r.checked ? 1 : 0, m: typeof r.memo === 'string' ? r.memo : '', date: r.date || f.slice(0, 10), issue: r.issue || 0 };
+    });
+  }
+  return base;
+}
+const fieldBase = loadFieldHistory();
+// 화면에 쓰는 누적 상태 — **현재 체크리스트에 있는 ID 만** 남긴다.
+// 개정으로 빠진 ID 는 세면 분모를 넘고 그릴 자리도 없다. 버리는 것은 화면뿐이고
+// 원본은 `data/field/*.jsonl` 과 md `## 임장 기록` 절에 그대로 있다.
+const fieldBaseCache = new Map();
+function fieldBaseOf(c) {
+  if (fieldBaseCache.has(c.key)) return fieldBaseCache.get(c.key);
+  const ids = new Set([...fieldIds, ...c.visit.map((it) => it.id)]);
+  const b = fieldBase[c.key] || {};
+  const out = {}, gone = [];
+  for (const id of Object.keys(b)) {
+    if (ids.has(id)) out[id] = b[id];
+    else gone.push(id);
+  }
+  if (gone.length) warn(`${c.key}: 임장 기록에 체크리스트에 없는 ID ${gone.join(' · ')} — 페이지에서만 뺀다(원본은 data/field 에 남는다)`);
+  fieldBaseCache.set(c.key, out);
+  return out;
+}
+const fieldDoneOf = (c) => Object.values(fieldBaseOf(c)).filter((x) => x.c).length;
+
 // ---------------------------------------------------------------- regions/*.md
 function parseRegion(file) {
   const text = read(file);
@@ -821,11 +861,14 @@ function regionPage(c, i) {
   const foldFacts = fold(`핵심 사실 · ${r.order.length}항목`, kv.html);
   const foldEst = ef ? fold('추정 시나리오 · 근거', ef.html) : '';
   const foldListings = lf ? fold(`매물 전체 ${ls.count}건 · 점수 근거`, lf) : '';
-  // 임장 기록은 '매수 전 확인' 바로 아래다 — 그 4종을 무엇으로 확인했는지가 현장 기록이다
+  // 임장 기록은 '매수 전 확인' 바로 아래 **한 줄**이다(2026-09-17 사용자 결정).
+  // 회차 전문을 여기에 펼치면 C~D 현장 메모가 판단 화면을 덮는데, 정작 현장에서 보는 화면(field.html)은 비어 있었다.
+  // 항목별 체크·메모는 임장 체크 페이지가 들고 있고, 이 줄은 '얼마나 봤는지 · 어디로 가는지'만 말한다.
+  // 회차 전문은 md `## 임장 기록` 절과 GitHub 이슈에 그대로 남는다 — 지운 것이 아니라 렌더를 줄인 것이다.
   const vl = c.visitLog;
-  const foldLog = vl.length
-    ? fold(`임장 기록 · ${vl.length}회 · 최근 ${vl[0].date}${vl[0].done !== null ? ` · 체크 ${vl[0].done} / ${vl[0].total}` : ''}`,
-      `<div class="cav" style="margin:0 0 8px">현장 관찰·중개사 발언은 C~D등급이다. 요약표·추정 블록의 계산에는 들어가지 않는다.</div><div data-md="md-log"></div>`)
+  const logDone = fieldDoneOf(c), logAll = fieldCount + c.visit.length;
+  const logLine = vl.length || logDone
+    ? `<div class="logline"><b>임장</b> ${vl.length ? `${vl.length}회 · 최근 ${vl[0].date} · ` : ''}누적 체크 <b>${logDone} / ${logAll}</b><a href="../field.html?r=${encodeURIComponent(c.key)}">체크리스트 ›</a></div>`
     : '';
   const foldQs = qs.length
     ? fold(`확인 중인 질문 ${openList.length}${qs.length - openList.length ? ` · 해소 ${qs.length - openList.length}` : ''}`,
@@ -836,10 +879,10 @@ function regionPage(c, i) {
     ...common, NAME: esc(c.name), SUB: esc([c.district, c.method, c.households].filter(Boolean).join(' · ')), NO: String(c.no), NO2: nn(c), SLUG: c.slug, UPDATED: c.updated, STYLE: c.style,
     FACTS: facts, TAGS: tagsHtml(c), STAGE: c.stageIdx === null ? `단계 미분류 · ${esc(c.stage)}` : '', STEPPER: stepper,
     MONEY: moneyHtml(c), JUDGE: judge, LISTINGS: listingsHtml, CHECKS: checks,
-    TOPLINKS: topLinks, FOLD_FACTS: foldFacts, FOLD_QS: foldQs, FOLD_EST: foldEst, FOLD_LISTINGS: foldListings, FOLD_LOG: foldLog,
+    TOPLINKS: topLinks, FOLD_FACTS: foldFacts, FOLD_QS: foldQs, FOLD_EST: foldEst, FOLD_LISTINGS: foldListings, LOG_LINE: logLine,
     PREV: prev ? `<a href="${nn(prev)}.html">‹ ${prev.no} ${esc(prev.name)}</a>` : '<span></span>',
     NEXT: next ? `<a href="${nn(next)}.html">${next.no} ${esc(next.name)} ›</a>` : '<span></span>',
-    MD_BLOCKS: [...kv.blocks, ef ? ef.block : '', vl.length ? mdBlock('log', r.logMd) : ''].join('\n'),
+    MD_BLOCKS: [...kv.blocks, ef ? ef.block : ''].join('\n'),   // 회차 전문은 페이지에 싣지 않는다 — 한 줄 + 체크리스트 페이지
   });
 }
 
@@ -854,9 +897,12 @@ const fieldRulesHtml = fieldRules.length
   : '';
 const fieldData = {
   common: fieldGroups,
-  // logs — 이미 커밋된 회차. 제출이 실제로 남았는지를 현장에서 확인하는 유일한 신호다(localStorage 는 기기마다 따로다)
+  // base — **커밋된 체크·메모**(data/field/*.jsonl 누적). 이것이 전 기기 공통 바탕이고,
+  //        localStorage 에는 아직 제출하지 않은 편집만 얹는다. 저장소가 공개라 페이지에 쓰기 토큰을 둘 수 없어
+  //        동기화 경로는 '제출 → 커밋 → 재배포' 하나뿐이다(1~2분).
+  // logs — 커밋된 회차 머리줄. 몇 번 갔는지를 현장에서 확인하는 신호다.
   regions: cards.filter((c) => c.visit.length).map((c) => ({
-    key: c.key, no: c.no, name: c.name, items: c.visit,
+    key: c.key, no: c.no, name: c.name, items: c.visit, base: fieldBaseOf(c),
     logs: c.visitLog.map((l) => ({ date: l.date, done: l.done, total: l.total, url: l.url })),
   })),
 };

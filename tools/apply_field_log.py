@@ -12,6 +12,10 @@ GitHub Actions(.github/workflows/field-log.yml)가 `field-log` 이슈가 열릴 
   전문을 URL 에 실으면 이슈 프리필 한계를 넘긴다. ID 가 고정 키라서 가능한 방식이다(site/README.md 7번).
 - **덮어쓰지 않는다.** 한 구역을 여러 번 간다(30 규칙 E4 평일 낮·밤, E5 비 온 다음날).
   회차 블록을 최신이 위로 쌓고, 회차는 이슈 번호로 유일해진다.
+- **한 회차에 오는 것은 그때 바뀐 것뿐이다**(2026-09-17). 임장 페이지가 이미 커밋된 항목을 다시 싣지 않는다 —
+  커밋된 체크·메모는 페이지가 `data/field/*.jsonl` 에서 바탕으로 깔기 때문이다. 그래서 회차 머리줄은
+  `이번 회차 N항목 · 누적 체크 X / M` 으로 적는다. 회차 수만 세면 "얼마나 봤는지"를 알 수 없고,
+  누적만 적으면 그 방문에서 무엇을 했는지가 사라진다.
 - 원본(md)과 축적(jsonl)을 분리한다. `data/field/YYYY-MM-DD.jsonl` 은 같은 날 여러 구역·여러 회차를
   **이어붙인다**(append). `data/listings` 는 회차마다 덮어쓰지만 임장은 회차 자체가 사건이라 지우면 안 된다.
 - 모르는 ID 는 버리지 않는다. 체크리스트가 개정돼 ID 가 빠졌어도 원문 그대로 남기고 경고한다.
@@ -165,13 +169,48 @@ def parse_body(text):
     return m[1], m[2], uniq
 
 
+# ---------------------------------------------------------------- 누적
+def load_history(key):
+    """`data/field/*.jsonl` 의 이 구역 항목 행을 회차순으로 병합 → `{ID: 체크여부}`.
+
+    페이지(`site/build.mjs` loadFieldHistory)와 **같은 규칙**으로 읽는다 — 파일명(날짜) 오름차순,
+    파일 안은 적재 순서, 같은 ID 를 다시 봤으면 나중 회차가 이긴다. 둘이 어긋나면 md 머리줄과 화면이 다른 수를 말한다.
+    """
+    d = os.path.join(ROOT, 'data', 'field')
+    out = {}
+    if not os.path.isdir(d):
+        return out
+    for f in sorted(x for x in os.listdir(d) if re.match(r'^\d{4}-\d{2}-\d{2}\.jsonl$', x)):
+        for line in read(os.path.join(d, f)).split('\n'):
+            if not line.strip():
+                continue
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue   # 깨진 줄은 건너뛴다 — 누적 수 하나 때문에 회차 반영 전체를 막지 않는다
+            if r.get('t') == 'item' and r.get('zone') == key and r.get('id'):
+                out[r['id']] = bool(r.get('checked'))
+    return out
+
+
+def cumulative(key, rows, ids):
+    """이번 회차까지의 누적 체크 수. 현재 체크리스트에 있는 ID 만 센다(개정으로 빠진 ID 는 분모를 넘는다)."""
+    hist = load_history(key)
+    for i, checked, _ in rows:
+        hist[i] = checked
+    return sum(1 for i in ids if hist.get(i))
+
+
 # ---------------------------------------------------------------- md 블록
-def render_block(name, date, rows, common, region_items, issue, url, warns):
-    """회차 블록 하나. 공통은 그룹 순서대로, 특이사항은 그 뒤, 모르는 ID 는 맨 끝에 원문 그대로."""
+def render_block(name, date, rows, common, region_items, issue, url, warns, cum, total):
+    """회차 블록 하나. 공통은 그룹 순서대로, 특이사항은 그 뒤, 모르는 ID 는 맨 끝에 원문 그대로.
+
+    머리줄은 `이번 회차 N항목 · 누적 체크 X / M`. N 은 그 방문에서 바뀐 것이고 X 는 구역 전체 진척이다 —
+    제출이 델타라서 N 만 적으면 몇 항목짜리 구역처럼 보인다. `누적 체크 X / M` 은 페이지가 읽는 형식이기도 하다.
+    """
     done = sum(1 for _, c, _ in rows if c)
-    total = sum(len(g[2]) for g in common) + len(region_items)
     src = f'[#{issue}]({url})' if issue and url else (f'#{issue}' if issue else '수동 입력')
-    out = [f'**{date} · {name}** — 체크 {done} / {total} · {src}', '']
+    out = [f'**{date} · {name}** — 이번 회차 {len(rows)}항목 · 누적 체크 {cum} / {total} · {src}', '']
     by_id = {r[0]: r for r in rows}
     used = set()
 
@@ -198,7 +237,7 @@ def render_block(name, date, rows, common, region_items, issue, url, warns):
         out += ['**미상 ID** — 체크리스트 개정으로 문구를 복원하지 못했다', '']
         out += [f'- [{"x" if c else " "}] {i}' + (f' — {m}' if m else '') for i, c, m in rest] + ['']
     out.append(f'출처: 현장 확인 ({date}) · 등급: C~D — 계산식에 넣지 않는다')
-    return '\n'.join(out), done, total
+    return '\n'.join(out), done
 
 
 def apply_section(path, block, dry_run):
@@ -234,12 +273,16 @@ def apply_section(path, block, dry_run):
 
 
 # ---------------------------------------------------------------- 이력 (jsonl)
-def write_history(key, no, name, date, rows, done, total, issue, url, dry_run):
-    """`data/field/YYYY-MM-DD.jsonl` — 회차 1행(visit) + 항목 N행(item). append-only."""
+def write_history(key, no, name, date, rows, done, cum, total, issue, url, dry_run):
+    """`data/field/YYYY-MM-DD.jsonl` — 회차 1행(visit) + 항목 N행(item). append-only.
+
+    `checked` 는 **이 회차에서** 체크한 수, `cum` 은 이 회차까지의 누적이다. 회차 로그라서 둘 다 필요하다 —
+    `checked` 만 두면 나중에 "그날 뭘 했나"를 못 읽고, `cum` 만 두면 회차가 사건이 아니라 스냅샷이 된다.
+    """
     d = os.path.join(ROOT, 'data', 'field')
     path = os.path.join(d, f'{date}.jsonl')
     recs = [dict(t='visit', zone=key, no=no, title=name, date=date, issue=issue, url=url,
-                 checked=done, total=total, reported=len(rows))]
+                 checked=done, cum=cum, total=total, reported=len(rows))]
     recs += [dict(t='item', zone=key, date=date, issue=issue, id=i, checked=bool(c), memo=m) for i, c, m in rows]
     if dry_run:
         return rel(path), len(recs)
@@ -265,18 +308,22 @@ def main():
     no, name, region_items = load_region(path)
     common = load_common()
     warns = []
-    block, done, total = render_block(name, date, rows, common, region_items, a.issue, a.url, warns)
+    ids = [i for g in common for i in g[2]] + list(region_items)
+    total = len(ids)
+    cum = cumulative(key, rows, ids)   # 이번 회차를 얹은 누적 — 페이지가 세는 수와 같아야 한다
+    block, done = render_block(name, date, rows, common, region_items, a.issue, a.url, warns, cum, total)
     first = apply_section(path, block, a.dry_run)
-    hist, n_rec = write_history(key, no, name, date, rows, done, total, a.issue, a.url, a.dry_run)
+    hist, n_rec = write_history(key, no, name, date, rows, done, cum, total, a.issue, a.url, a.dry_run)
 
     relp = rel(path)
-    print(f'ok  {name} {date} · 체크 {done} / {total} · {relp} {"절 신설" if first else "회차 추가"} · {hist} +{n_rec}행'
+    print(f'ok  {name} {date} · 이번 회차 {len(rows)}항목(체크 {done}) · 누적 체크 {cum} / {total}'
+          f' · {relp} {"절 신설" if first else "회차 추가"} · {hist} +{n_rec}행'
           + (f' · 경고 {len(warns)}건' if warns else ''))
     for w in warns:
         print('WARN  ' + w)
 
     if a.summary:
-        msg = [f'auto-field: {name} 임장 기록 {date} — 체크 {done} / {total}', '',
+        msg = [f'auto-field: {name} 임장 기록 {date} — 이번 회차 {len(rows)}항목 · 누적 체크 {cum} / {total}', '',
                f'- 항목: {relp} `## 임장 기록` {"절 신설" if first else "회차 추가"} · {hist} +{n_rec}행',
                f'- 출처: 현장 확인 ({date}) · 이슈 {a.url or "#" + str(a.issue)}',
                '- 등급: C~D (현장 관찰 — 요약표·추정 블록 편입 금지)',
@@ -285,7 +332,7 @@ def main():
         with open(a.summary, 'wb') as f:
             f.write(('\n'.join(msg) + '\n').encode('utf-8'))
     if a.comment:
-        c = [f'기록했다 — **{name}** {date} · 체크 {done} / {total}', '',
+        c = [f'기록했다 — **{name}** {date} · 이번 회차 {len(rows)}항목(체크 {done}) · 누적 체크 {cum} / {total}', '',
              f'- `{relp}` 의 `## 임장 기록` 절에 {"첫 회차를 만들었다" if first else "회차를 추가했다"}',
              f'- `{hist}` 에 {n_rec}행 적재(append-only)',
              '- 등급 C~D — 요약표·추정 블록의 계산에는 들어가지 않는다',
