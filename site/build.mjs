@@ -100,6 +100,42 @@ function parseBasis(cell) {
   return { raw: s, label, short, grade: m ? m[2] : null, placeholder: /자리표시자/.test(s), approx: /근사/.test(s) };
 }
 
+// ---------------------------------------------------------------- 임장 체크리스트
+// 공통은 30_FIELD_CHECKLIST.md 의 '## A. 제목' 그룹별 첫 표, 구역별은 regions/NN_*.md 의 '## 임장' 절.
+// ID 는 페이지가 체크 상태를 저장하는 키다 — 문구가 바뀌어도 ID 는 그대로 둔다(site/README.md).
+const VISIT_COLS = ['ID', '확인', '현장에서', '왜'];
+// 요약표 번호는 재번호된 전례가 있어(10 v3.0·v3.1) 저장 키로 못 쓴다. 번호를 뗀 slug 를 쓴다.
+const regionKey = (file) => file.replace(/^regions\/\d+_/, '').replace(/\.md$/, '');
+function visitRows(t, where) {
+  const items = t.rows
+    .map((row) => ({ id: strip(row['ID']), what: strip(row['확인']), how: strip(row['현장에서']), why: strip(row['왜']) }))
+    .filter((it) => it.id && it.what);
+  const seen = new Set();
+  for (const it of items) { if (seen.has(it.id)) warn(`${where}: 임장 ID 중복 ${it.id}`); seen.add(it.id); }
+  return items;
+}
+const FIELD_FILE = '30_FIELD_CHECKLIST.md';
+const fieldMd = read(FIELD_FILE);
+const fieldHead = fieldMd.match(/\*\*버전\*\* (v[\d.]+) \| \*\*갱신\*\* (\d{4}-\d{2}-\d{2})/);
+if (!fieldHead) fail(`${FIELD_FILE}: 헤더에서 '**버전** vX.Y | **갱신** YYYY-MM-DD' 를 읽지 못했다`);
+const fieldLines = fieldMd.split('\n');
+const fieldGroups = [];
+fieldLines.forEach((l, i) => {
+  const m = l.match(/^## ([A-Z])\. (.+)$/);
+  if (!m) return;
+  const nx = fieldLines.findIndex((x, k) => k > i && /^## /.test(x));
+  const t = tableAfter(fieldLines.slice(i, nx < 0 ? fieldLines.length : nx), /^## /, `${FIELD_FILE} ${m[1]}`);
+  if (!t) { warn(`${FIELD_FILE}: ${m[1]} 그룹 아래 표가 없다`); return; }
+  for (const c of VISIT_COLS) if (!t.header.includes(c)) { warn(`${FIELD_FILE} ${m[1]}: 표에 '${c}' 열이 없다`); return; }
+  fieldGroups.push({ id: m[1], title: m[2].trim(), items: visitRows(t, `${FIELD_FILE} ${m[1]}`) });
+});
+if (!fieldGroups.length) fail(`${FIELD_FILE}: '## A. 제목' 그룹을 하나도 찾지 못했다`);
+const fieldCount = fieldGroups.reduce((a, g) => a + g.items.length, 0);
+const fieldIds = fieldGroups.flatMap((g) => g.items.map((it) => it.id));
+if (new Set(fieldIds).size !== fieldIds.length) warn(`${FIELD_FILE}: 그룹을 가로질러 ID 가 중복된다`);
+const fieldDeclared = Number((fieldMd.match(/\*\*항목 수\*\* (\d+)/) || [])[1]);
+if (fieldDeclared && fieldDeclared !== fieldCount) warn(`${FIELD_FILE}: 헤더 항목 수 ${fieldDeclared} ≠ 실제 ${fieldCount}`);
+
 // ---------------------------------------------------------------- regions/*.md
 function parseRegion(file) {
   const text = read(file);
@@ -108,11 +144,13 @@ function parseRegion(file) {
   if (!m) fail(`${file}: 첫 줄이 '# N. 이름' 형식이 아니다: ${lines[0]}`);
   const estIdx = lines.findIndex((l) => /^## 추정/.test(l));
   const listIdx = lines.findIndex((l) => /^## 매물/.test(l));
+  const visitIdx = lines.findIndex((l) => /^## 임장/.test(l));
   const secEnd = (from) => { const nx = lines.findIndex((l, k) => k > from && /^## /.test(l)); return nx < 0 ? lines.length : nx; };
-  const firstSec = [estIdx, listIdx].filter((k) => k >= 0).sort((a, b) => a - b)[0];
+  const firstSec = [estIdx, visitIdx, listIdx].filter((k) => k >= 0).sort((a, b) => a - b)[0];
   const bodyLines = firstSec === undefined ? lines.slice(1) : lines.slice(1, firstSec);
   const estLines = estIdx < 0 ? [] : lines.slice(estIdx, secEnd(estIdx));
   const listLines = listIdx < 0 ? [] : lines.slice(listIdx, secEnd(listIdx));
+  const visitLines = visitIdx < 0 ? [] : lines.slice(visitIdx, secEnd(visitIdx));
   const fields = {};
   const order = [];
   let cur = null;
@@ -131,7 +169,8 @@ function parseRegion(file) {
   }
   const est = estIdx < 0 ? null : { heading: lines[estIdx], table: tableAfter(estLines, /^## 추정/, `${file} 추정`), text: estLines.join('\n') };
   const list = listIdx < 0 ? null : { heading: lines[listIdx], table: tableAfter(listLines, /^## 매물/, `${file} 매물`), note: listLines.slice(1).find((l) => l.trim() && !l.trim().startsWith('|')) || '', lines: listLines };
-  return { no: Number(m[1]), file, headingTitle: m[2].trim(), fields, order, est, list, md: text, bullets: bodyLines.filter((l) => /^- /.test(l)).length, bodyMd: bodyLines.join('\n').trim(), estMd: estLines.join('\n').trim(), listMd: listLines.join('\n').trim() };
+  const visit = visitIdx < 0 ? null : { heading: lines[visitIdx], table: tableAfter(visitLines, /^## 임장/, `${file} 임장`) };
+  return { no: Number(m[1]), file, headingTitle: m[2].trim(), visit, fields, order, est, list, md: text, bullets: bodyLines.filter((l) => /^- /.test(l)).length, bodyMd: bodyLines.join('\n').trim(), estMd: estLines.join('\n').trim(), listMd: listLines.join('\n').trim() };
 }
 const regionFiles = readdirSync(path.join(ROOT, 'regions')).filter((f) => /^\d{2}_.+\.md$/.test(f)).sort();
 if (regionFiles.length === 0) fail('regions/ 에 NN_slug.md 파일이 없다');
@@ -244,6 +283,16 @@ function parseListings(r) {
   for (const it of items) if (it.score === null) warn(`${r.file}: 매물 '${it.name}' 점수가 숫자가 아니다`);
   return { ...meta, count: items.length, items };
 }
+// ## 임장 절 — 구역별 특이사항. 공통 32항목은 30_FIELD_CHECKLIST.md 에 있다.
+// ID 는 페이지의 체크 상태 저장 키라서 문구가 바뀌어도 그대로 둔다(site/README.md).
+function parseVisit(r) {
+  if (!r.visit) return [];
+  const t = r.visit.table;
+  if (!t) { warn(`${r.file}: ## 임장 아래 표가 없다`); return []; }
+  for (const c of VISIT_COLS) if (!t.header.includes(c)) { warn(`${r.file}: 임장 표에 '${c}' 열이 없다`); return []; }
+  return visitRows(t, r.file);
+}
+
 // 비교단지 한 줄 — 이름 · 입주연도 · 표본 수
 function compareInfo(r) {
   const f = get(r, '비교단지') || get(r, '비교시세');
@@ -414,14 +463,14 @@ const allCards = summary.rows.map((row) => {
     cash: cashOf(row['실거주매매가']),
   };
   return {
-    no, slug: r.file.replace(/^regions\//, '').replace(/\.md$/, ''), name, nameNote, district: d ? d.name : null, seoul: d ? d.seoul : null,
+    no, slug: r.file.replace(/^regions\//, '').replace(/\.md$/, ''), key: regionKey(r.file), name, nameNote, district: d ? d.name : null, seoul: d ? d.seoul : null,
     mapAddr: mapAddress(loc ? loc.value : '', d ? d.seoul : null),
     method, moa: /모아/.test(method), stage, stageShort: stageShort(stage, /미검증/.test(stage)), stageIdx, unverified: /미검증/.test(stage), style,
     households: households(get(r, '세대수')), area, baseDate, baseDateGrade, stageDocGrade, contractor, moveIn: moveIn(r), compareInfo: compareInfo(r),
     price, est, chain: estChain(r), toheo, trust: strip(row['신뢰도']), basis,
     questions: qs.map((q) => q.id), openIds: qs.filter((q) => !q.resolved).map((q) => q.id), open: qs.filter((q) => !q.resolved).length,
     riskShort, riskLine, riskLead: risk ? risk.tail || null : null, riskFirst, riskRest,
-    listings: parseListings(r), bullets: r.bullets, bytes: Buffer.byteLength(r.md, 'utf8'), updated,
+    visit: parseVisit(r), listings: parseListings(r), bullets: r.bullets, bytes: Buffer.byteLength(r.md, 'utf8'), updated,
   };
 });
 for (const q of questions) {
@@ -715,7 +764,7 @@ function regionPage(c, i) {
     const top = ls.items.slice(0, 3);
     const src = ls.noteLinks[0];
     const line = [ls.date ? `수집 ${ls.date}` : null, ls.total ? `예산 통과 ${ls.count} / ${ls.total}건` : null, ls.priceRange ? `구역 호가 ${ls.priceRange}억` : null].filter(Boolean).join(' · ');
-    const head = `<div class="sec"><span>매수 후보 · 호가 <i class="grade d">D</i></span><em>${src ? `<a href="${esc(src.url)}" target="_blank" rel="noopener">${esc(src.label)}</a> · ` : ''}${top.length ? `상위 ${top.length}` : '0건'}</em></div>`;
+    const head = `<div class="grp-h"><span>매수 후보 · 호가 <i class="grade d">D</i></span><em>${src ? `<a href="${esc(src.url)}" target="_blank" rel="noopener">${esc(src.label)}</a> · ` : ''}${top.length ? `상위 ${top.length}` : '0건'}</em></div>`;
     if (!top.length) return head + `<div class="cav">${esc(line || cut(ls.note, 120))}</div>`;
     // 링크 셀에 '모바일' 링크가 있으면 따로 그리지 않고 네이버 링크의 data-m 으로 붙인다 — 페이지 스크립트가 모바일 UA에서 href 를 바꾼다
     const linkHtml = (links) => {
@@ -751,11 +800,21 @@ function regionPage(c, i) {
     ...common, NAME: esc(c.name), SUB: esc([c.district, c.method, c.households].filter(Boolean).join(' · ')), NO: String(c.no), NO2: nn(c), SLUG: c.slug, UPDATED: c.updated, STYLE: c.style,
     FACTS: facts, TAGS: tagsHtml(c), STAGE: c.stageIdx === null ? `단계 미분류 · ${esc(c.stage)}` : '', STEPPER: stepper,
     MONEY: moneyHtml(c), JUDGE: judge, LISTINGS: listingsHtml, CHECKS: checks, FOLDS: foldsHtml,
+    KEY: encodeURIComponent(c.key), VISIT_N: String(c.visit.length),
     PREV: prev ? `<a href="${nn(prev)}.html">‹ ${prev.no} ${esc(prev.name)}</a>` : '<span></span>',
     NEXT: next ? `<a href="${nn(next)}.html">${next.no} ${esc(next.name)} ›</a>` : '<span></span>',
     MD_BLOCKS: [...kv.blocks, ef ? ef.block : ''].join('\n'),
   });
 }
+
+// ---------------------------------------------------------------- 임장 페이지
+const visitless = cards.filter((c) => !c.visit.length);
+if (visitless.length) warn(`## 임장 절이 없는 구역: ${visitless.map((c) => c.no + ' ' + c.name).join(' · ')}`);
+const fieldChips = cards.map((c) => `<a href="field.html?r=${encodeURIComponent(c.key)}" data-k="${esc(c.key)}">${esc(c.name)}<small>${c.visit.length}</small></a>`).join('');
+const fieldData = {
+  common: fieldGroups,
+  regions: cards.filter((c) => c.visit.length).map((c) => ({ key: c.key, no: c.no, name: c.name, items: c.visit })),
+};
 
 // ---------------------------------------------------------------- 쓰기
 rmSync(OUT, { recursive: true, force: true });
@@ -763,8 +822,12 @@ mkdirSync(path.join(OUT, 'regions'), { recursive: true });
 const common = { VERSION: registry.version, UPDATED: registry.updated, COUNT: String(cards.length), BUILT: built, REPO, WARNINGS: warnings.length ? `경고 ${warnings.length}건 (빌드 로그)` : '' };
 writeFileSync(path.join(OUT, 'index.html'), fill(readFileSync(path.join(TPL, 'index.html'), 'utf8'), { ...common, LEAD: esc(lead), STAGEMAP: stagemap, PILLS: pillsHtml, GROUPS: groupsHtml }));
 writeFileSync(path.join(OUT, 'docs.html'), fill(readFileSync(path.join(TPL, 'docs.html'), 'utf8'), { ...common, TABS: tabsHtml, PANELS: panelsHtml, MD_BLOCKS: mdBlocks }));
+writeFileSync(path.join(OUT, 'field.html'), fill(readFileSync(path.join(TPL, 'field.html'), 'utf8'), {
+  ...common, FIELD_VERSION: fieldHead[1], FIELD_UPDATED: fieldHead[2], FIELD_COUNT: String(fieldCount), CHIPS: fieldChips,
+  DATA: JSON.stringify(fieldData).replace(/</g, '\\u003c'),
+}));
 cards.forEach((c, i) => writeFileSync(path.join(OUT, 'regions', nn(c) + '.html'), regionPage(c, i)));
-writeFileSync(path.join(OUT, 'data.json'), JSON.stringify({ registry, built, warnings, rules: { ltv: LTV, caps: CAPS, fee: !!feeText }, stages: STAGES.map((s) => s[0]), pills, cards, hidden, questions: shownQuestions }, null, 2));
+writeFileSync(path.join(OUT, 'data.json'), JSON.stringify({ registry, built, warnings, rules: { ltv: LTV, caps: CAPS, fee: !!feeText }, stages: STAGES.map((s) => s[0]), pills, cards, hidden, questions: shownQuestions, field: { version: fieldHead[1], updated: fieldHead[2], count: fieldCount, groups: fieldGroups } }, null, 2));
 if (existsSync(path.join(ROOT, 'site', 'static'))) for (const f of readdirSync(path.join(ROOT, 'site', 'static'))) writeFileSync(path.join(OUT, f), readFileSync(path.join(ROOT, 'site', 'static', f)));
 
-console.log(`ok  ${registry.version} · ${cards.length}개 구역${hidden.length ? ` · 숨김 ${hidden.map((h) => h.no + ' ' + h.name).join(' · ')}` : ''} · ${GROUPS.map(([, t, , pred]) => `${t} ${cards.filter(pred).length}`).filter((s) => !/ 0$/.test(s)).join(' / ')} · 미해결 ${openUnique} · 경고 ${warnings.length}`);
+console.log(`ok  ${registry.version} · ${cards.length}개 구역 · 임장 공통 ${fieldCount} + 구역별 ${cards.reduce((a, c) => a + c.visit.length, 0)}${hidden.length ? ` · 숨김 ${hidden.map((h) => h.no + ' ' + h.name).join(' · ')}` : ''} · ${GROUPS.map(([, t, , pred]) => `${t} ${cards.filter(pred).length}`).filter((s) => !/ 0$/.test(s)).join(' / ')} · 미해결 ${openUnique} · 경고 ${warnings.length}`);

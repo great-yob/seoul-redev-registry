@@ -1,79 +1,83 @@
 <!DOCTYPE html>
 <html lang="ko">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{NAME}} · 서울 재개발 구역 레지스트리</title>
-<meta name="description" content="{{NAME}} — {{SUB}}. 단계 · 돈의 흐름 · 판단 · 매수 전 확인 4종">
-<link rel="stylesheet" href="../site.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{NAME}} · 서울 재개발 구역 레지스트리</title>
+  <meta name="description" content="{{NAME}} — {{SUB}}. 단계 · 돈의 흐름 · 판단 · 매수 전 확인 4종">
+  <link rel="stylesheet" href="../site.css">
 </head>
+
 <body>
-<div class="wrap narrow">
-  <div class="eyebrow"><a href="../index.html">← 전체</a> · {{NO}} / {{COUNT}} · 갱신 {{UPDATED}}</div>
-  <h1>{{NAME}}</h1>
-  <div class="facts">{{FACTS}}</div>
-  <div class="tags">{{TAGS}}</div>
+  <div class="wrap narrow">
+    <div class="eyebrow">{{UPDATED}} 업데이트</div>
+    <h1>{{NAME}}</h1>
+    <div class="facts">{{FACTS}}</div>
+    <div class="tags">{{TAGS}}</div>
 
-  <div class="sec"><span>단계</span><em>{{STAGE}}</em></div>
-  <ol class="vs">{{STEPPER}}</ol>
+    <div class="grp-h"><span>단계</span><em>{{STAGE}}</em></div>
+    <ol class="vs">{{STEPPER}}</ol>
 
-  <div class="sec"><span>돈의 흐름 · 84㎡ · 억원</span><em>실거주 · 무주택</em></div>
-  <div class="pm {{STYLE}}">{{MONEY}}</div>
+    <div class="grp-h"><span>돈의 흐름</span><em>84㎡ · 억원</em></div>
+    <div class="pm {{STYLE}}">{{MONEY}}</div>
 
-  <div class="sec"><span>지금 판단</span></div>
-  <div class="jbox">{{JUDGE}}</div>
+    <div class="grp-h"><span>현재 판단</span></div>
+    <div class="jbox">{{JUDGE}}</div>
 
-  {{LISTINGS}}
+    {{LISTINGS}}
 
-  <div class="sec"><span>매수 전 확인 4종</span></div>
-  <div class="ck">{{CHECKS}}</div>
+    <div class="grp-h"><span>매수 전 확인 4종</span><em><a href="../field.html?r={{KEY}}">임장 체크 {{VISIT_N}}항목 ↗</a></em></div>
+    <div class="ck">{{CHECKS}}</div>
 
-  <div class="sec"><span>근거</span><em>접힘 · 열면 표로</em></div>
-  {{FOLDS}}
+    <div class="grp-h"><span>관련 문서</span></div>
+    {{FOLDS}}
 
-  <nav class="pn">{{PREV}}<span></span>{{NEXT}}</nav>
 
-  <footer>
-    <span>원문 <a href="../docs.html#r{{NO2}}">문서 뷰</a> · <a href="https://github.com/{{REPO}}/blob/main/regions/{{SLUG}}.md" target="_blank" rel="noopener">GitHub</a></span>
-    <span>분양가 · 권리가액은 감정평가 전 추정치. 안전마진은 확정 수익이 아니다.</span>
-  </footer>
-</div>
-{{MD_BLOCKS}}
-<script>
-(function () {
-  // 네이버 부동산은 PC(new.land)와 모바일(fin.land) URL 형식이 다르다. 모바일 UA면 data-m 링크로 바꾼다
-  if (/iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent)) {
-    document.querySelectorAll('a[data-m]').forEach(function (a) { a.href = a.getAttribute('data-m'); });
-  }
-  var loading = null;
-  function ensureMarked() {
-    if (window.marked) return Promise.resolve();
-    if (!loading) loading = new Promise(function (res, rej) {
-      var s = document.createElement('script');
-      s.src = 'https://cdn.jsdelivr.net/npm/marked@12/marked.min.js';
-      s.onload = res; s.onerror = rej; document.head.appendChild(s);
-    });
-    return loading;
-  }
-  // 접힘 안의 [data-md] 는 열릴 때만 렌더한다 — "더 보기" · 근거 사슬 전체
-  function render(el) {
-    if (el.dataset.done) return;
-    el.dataset.done = '1';
-    var src = document.getElementById(el.dataset.md);
-    if (!src) return;
-    ensureMarked().then(function () {
-      el.innerHTML = marked.parse(src.textContent, { gfm: true, breaks: false });
-    }).catch(function () {
-      el.innerHTML = '<pre style="white-space:pre-wrap">' + src.textContent.replace(/</g, '&lt;') + '</pre>';
-    });
-  }
-  document.querySelectorAll('details').forEach(function (d) {
-    d.addEventListener('toggle', function () {
-      if (!d.open) return;
-      d.querySelectorAll(':scope > [data-md], :scope > * > [data-md]').forEach(render);
-    });
-  });
-})();
-</script>
+    <footer>
+      <span>원문보기 <a href="../docs.html#r{{NO2}}">원본문서-해당구역</a> · <a
+          href="https://github.com/{{REPO}}/blob/main/regions/{{SLUG}}.md" target="_blank"
+          rel="noopener">GitHub-해당구역</a></span>
+      <span><br>분양가 · 권리가액은 감정평가 전 추정치.<br>안전마진은 확정 수익이 아니다.</span>
+    </footer>
+  </div>
+  {{MD_BLOCKS}}
+  <script>
+    (function () {
+      // 네이버 부동산은 PC(new.land)와 모바일(fin.land) URL 형식이 다르다. 모바일 UA면 data-m 링크로 바꾼다
+      if (/iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent)) {
+        document.querySelectorAll('a[data-m]').forEach(function (a) { a.href = a.getAttribute('data-m'); });
+      }
+      var loading = null;
+      function ensureMarked() {
+        if (window.marked) return Promise.resolve();
+        if (!loading) loading = new Promise(function (res, rej) {
+          var s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/marked@12/marked.min.js';
+          s.onload = res; s.onerror = rej; document.head.appendChild(s);
+        });
+        return loading;
+      }
+      // 접힘 안의 [data-md] 는 열릴 때만 렌더한다 — "더 보기" · 근거 사슬 전체
+      function render(el) {
+        if (el.dataset.done) return;
+        el.dataset.done = '1';
+        var src = document.getElementById(el.dataset.md);
+        if (!src) return;
+        ensureMarked().then(function () {
+          el.innerHTML = marked.parse(src.textContent, { gfm: true, breaks: false });
+        }).catch(function () {
+          el.innerHTML = '<pre style="white-space:pre-wrap">' + src.textContent.replace(/</g, '&lt;') + '</pre>';
+        });
+      }
+      document.querySelectorAll('details').forEach(function (d) {
+        d.addEventListener('toggle', function () {
+          if (!d.open) return;
+          d.querySelectorAll(':scope > [data-md], :scope > * > [data-md]').forEach(render);
+        });
+      });
+    })();
+  </script>
 </body>
+
 </html>
