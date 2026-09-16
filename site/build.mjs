@@ -737,7 +737,7 @@ function regionPage(c, i) {
   // 임장 수는 그 구역치 전부(공통 + 특이사항) — field.html 칩 배지와 같은 수여야 한다
   const topLinks = [
     c.mapAddr ? `<a href="https://map.naver.com/p/search/${encodeURIComponent(c.mapAddr)}" target="_blank" rel="noopener">지도 ↗</a>` : null,
-    `<a href="../field.html?r=${encodeURIComponent(c.key)}">임장 체크 <b>${fieldCount + c.visit.length}</b></a>`,
+    `<a class="pri" href="../field.html?r=${encodeURIComponent(c.key)}">임장 체크 <b>${fieldCount + c.visit.length}</b></a>`,
   ].filter(Boolean).join('');
   const axis = axisOf(c.method);
   const steps = AXES[axis];
