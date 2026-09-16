@@ -1,0 +1,94 @@
+name: Field log (임장 기록)
+
+# 임장 페이지(field.html)의 「제출」이 채워서 여는 이슈를 받아 regions/*.md 의 `## 임장 기록` 절에 쌓는다.
+# 저장소가 공개라 아무나 이슈를 열 수 있다 — 소유자가 연 이슈, 그리고 임장 페이지가 박은 표시가 있는 이슈만 처리한다.
+# 실패하면 이슈를 열어 둔 채 사유를 댓글로 단다. 조용히 삼키지 않는다.
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: field-log
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      github.event.issue.user.login == github.event.repository.owner.login &&
+      contains(github.event.issue.body, '<!-- field-log v1')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main (전체 이력 — 구역별 갱신일을 git log로 찍는다)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 이슈 본문 꺼내기 (셸 확장 없이 파일로)
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: printf '%s' "$ISSUE_BODY" > /tmp/body.txt
+
+      - name: Apply (이슈 → data/field 적재 + 구역 md `## 임장 기록`)
+        run: |
+          python tools/apply_field_log.py \
+            --body-file /tmp/body.txt \
+            --issue "${{ github.event.issue.number }}" \
+            --url "${{ github.event.issue.html_url }}" \
+            --summary /tmp/summary.md \
+            --comment /tmp/comment.md
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build check (파서 규약이 깨지면 여기서 실패 — 커밋 안 함)
+        run: node site/build.mjs
+
+      - name: Commit, push, deploy pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # data/field 는 신규 파일이라 git diff 에 안 잡힌다 — 미추적까지 보는 git status 로 판정
+          if git diff --quiet -- regions && [ -z "$(git status --porcelain -- data)" ]; then
+            echo "변경 없음 — 커밋하지 않는다"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add regions data
+          git commit -F /tmp/summary.md
+          # 매주 금요일 listings.yml 이 같은 파일들에 커밋한다 — 겹치면 rebase 하고 재시도한다
+          git pull --rebase origin main
+          git push origin HEAD:main
+          # GITHUB_TOKEN 으로 push 한 커밋은 다른 워크플로를 자동으로 깨우지 않는다 → Pages 배포를 직접 호출
+          gh workflow run pages.yml --ref main
+
+      - name: 이슈에 결과 달고 닫기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "${{ github.event.issue.number }}" --body-file /tmp/comment.md
+          gh issue close "${{ github.event.issue.number }}" --reason completed
+
+      - name: 실패했으면 이슈에 사유를 남기고 열어 둔다
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          printf '%s\n\n%s\n' \
+            "반영하지 못했다. **이 이슈는 열어 둔다** — 본문은 그대로 남아 있으니 고쳐서 다시 제출하거나 세션에서 손으로 반영한다." \
+            "실행 로그: $RUN" > /tmp/fail.md
+          gh issue comment "${{ github.event.issue.number }}" --body-file /tmp/fail.md

@@ -32,14 +32,15 @@
     <footer>
       <span>원문보기 <a href="https://github.com/{{REPO}}/blob/main/30_FIELD_CHECKLIST.md" target="_blank"
           rel="noopener">원본문서-공통사항</a></span>
-      <span><br>체크·메모는 <b>이 브라우저에만</b> 저장된다.<br>임장이 끝나면 <b>내보내기</b>로 기록을 커밋해야 한다.</span>
+      <span><br>체크·메모는 <b>이 브라우저에만</b> 저장된다.<br>임장이 끝나면 <b>제출</b>을 눌러야 기록이 남는다.</span>
     </footer>
   </div>
 
   <div class="fbar" id="bar" hidden>
     <div class="pg"><i id="pgi"></i></div>
     <span id="pgt">0 / 0</span>
-    <button id="exp">내보내기</button>
+    <button id="sub">제출</button>
+    <button id="exp" class="gh">복사</button>
     <button id="rst" class="gh">초기화</button>
   </div>
 
@@ -54,6 +55,16 @@
       var COMMON_N = D.common.reduce(function (a, g) { return a + g.items.length; }, 0);
 
       function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } }
+      // 제출 이력 — 이 브라우저 기준. 올리고 돌아왔을 때 흔적이 없으면 같은 구역을 두 번 올리게 된다.
+      // 확정 기록은 여기가 아니라 구역 md 의 `## 임장 기록` 절(= region.logs)에 있다.
+      var SENT = 'redev-field-sent';
+      function sentAll() { try { return JSON.parse(localStorage.getItem(SENT)) || {}; } catch (e) { return {}; } }
+      function markSent(date, n) {
+        var s = sentAll();
+        s[region.key] = { d: date, n: n };
+        try { localStorage.setItem(SENT, JSON.stringify(s)); } catch (e) { /* 사파리 시크릿 모드 */ }
+        progress();
+      }
       // 렌더할 때마다 rec() 가 빈 칸을 만들어 두므로, 저장 직전에 체크도 메모도 없는 항목은 털어낸다
       function save() {
         var out = {};
@@ -127,7 +138,10 @@
         document.getElementById('pgt').textContent = done + ' / ' + all;
         document.getElementById('pgi').style.width = all ? (100 * done / all).toFixed(1) + '%' : '0';
         chips();
-        document.getElementById('note').textContent = region.name + ' — 공통 ' + COMMON_N + ' + 특이사항 ' + region.items.length + ' = 이 구역치 ' + all + '항목. 체크·메모는 구역마다 따로 쌓인다.';
+        var logs = region.logs || [], s = sentAll()[region.key];
+        document.getElementById('note').textContent = region.name + ' — 공통 ' + COMMON_N + ' + 특이사항 ' + region.items.length + ' = 이 구역치 ' + all + '항목. 체크·메모는 구역마다 따로 쌓인다.'
+          + (logs.length ? ' 커밋된 기록 ' + logs.length + '회(최근 ' + logs[0].date + ').' : '')
+          + (s ? ' 이 기기에서 ' + s.d + ' 에 ' + s.n + '항목 제출했다.' : '');
       }
 
       // 체크 상자만이 아니라 제목 줄도 탭 대상이다 — 장갑 낀 손으로 28px 상자를 겨누게 하지 않는다
@@ -172,29 +186,58 @@
         });
       });
 
-      // 내보내기 — 한 구역치 전부. 세션에 붙여넣으면 그 구역 md 의 '## 임장 기록' 으로 커밋된다
-      document.getElementById('exp').addEventListener('click', function () {
-        if (!region) return;
-        var today = new Date().toISOString().slice(0, 10), out = [];
-        out.push('## 임장 기록 — ' + region.name + ' (' + today + ')', '');
+      // 한 구역치 기록을 두 벌로 만든다.
+      //   payload — 이슈 본문. ID·체크·메모만 싣는다. 항목 문구는 워크플로가 30_FIELD_CHECKLIST.md 에서 ID 로 복원한다.
+      //             한글은 URL 인코딩되면 글자당 9바이트라 문구까지 실으면 이슈 프리필 한계(8KB)를 넘긴다.
+      //   md      — 클립보드용 전문. 신호가 없거나 본문이 길 때 쓰는 대비책이다.
+      function collect() {
+        var today = new Date().toISOString().slice(0, 10), pay = [], md = [], n = 0;
+        pay.push('<!-- field-log v1 key=' + region.key + ' date=' + today + ' -->', '');
+        md.push('## 임장 기록 — ' + region.name + ' (' + today + ')', '');
         function block(title, list) {
           var any = list.filter(function (it) { var x = rec(it.id); return x.c || x.m; });
           if (!any.length) return;
-          out.push('**' + title + '**', '');
+          md.push('**' + title + '**', '');
           any.forEach(function (it) {
-            var x = rec(it.id);
-            out.push('- [' + (x.c ? 'x' : ' ') + '] ' + it.id + ' ' + it.what + (x.m ? ' — ' + x.m.replace(/\s*\n\s*/g, ' / ') : ''));
+            var x = rec(it.id), m = x.m ? x.m.replace(/\s*\n\s*/g, ' / ').trim() : '';
+            n++;
+            pay.push(it.id + ' ' + (x.c ? 'x' : '-') + (m ? ' ' + m : ''));
+            md.push('- [' + (x.c ? 'x' : ' ') + '] ' + it.id + ' ' + it.what + (m ? ' — ' + m : ''));
           });
-          out.push('');
+          md.push('');
         }
         D.common.forEach(function (g) { block('공통 ' + g.id + '. ' + g.title, g.items); });
         block('특이사항 · ' + region.name, region.items);
-        if (out.length <= 2) { alert('체크하거나 메모한 항목이 없다.'); return; }
-        out.push('출처: 현장 확인 (' + today + ') · 등급: C~D — 계산식에 넣지 않는다');
-        var text = out.join('\n');
-        var done = function () { alert('복사했다. 세션에 붙여넣으면 기록으로 커밋된다.'); };
-        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () { window.prompt('복사해서 세션에 붙여넣는다', text); });
-        else window.prompt('복사해서 세션에 붙여넣는다', text);
+        if (!n) return null;
+        pay.push('', '---', '현장 확인 · C~D등급. 사진은 이 이슈에 첨부한다. 제출하면 기록이 커밋되고 이슈는 닫힌다.');
+        md.push('출처: 현장 확인 (' + today + ') · 등급: C~D — 계산식에 넣지 않는다');
+        return { today: today, n: n, title: '임장 기록 — ' + region.name + ' (' + today + ')', payload: pay.join('\n'), md: md.join('\n') };
+      }
+      function copy(text, msg) {
+        var ok = function () { alert(msg); };
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, function () { window.prompt(msg, text); });
+        else window.prompt(msg, text);
+      }
+
+      // 제출 — 채워진 이슈 폼을 연다. 아이패드에서 붙여넣을 곳을 찾지 않게 하는 것이 요점이다.
+      // 토큰은 어디에도 두지 않는다. 저장소가 공개라 페이지에 쓰기 권한을 심을 수 없고, 인증은 GitHub 로그인 세션이 한다.
+      var ISSUE = 'https://github.com/{{REPO}}/issues/new';
+      document.getElementById('sub').addEventListener('click', function () {
+        var g = collect();
+        if (!g) { alert('체크하거나 메모한 항목이 없다.'); return; }
+        var url = ISSUE + '?labels=field-log&title=' + encodeURIComponent(g.title) + '&body=' + encodeURIComponent(g.payload);
+        if (url.length > 6000) {   // 프리필 URL 한계 — 본문은 클립보드로 넘기고 빈 폼만 연다
+          copy(g.payload, '메모가 길어 본문을 복사했다. 열리는 이슈 폼에 붙여넣고 제출한다.');
+          url = ISSUE + '?labels=field-log&title=' + encodeURIComponent(g.title);
+        }
+        markSent(g.today, g.n);
+        window.open(url, '_blank', 'noopener');
+      });
+      // 복사 — 예전 경로. 신호가 없는 현장에서 쓰고, 나중에 세션에 붙여넣는다
+      document.getElementById('exp').addEventListener('click', function () {
+        var g = collect();
+        if (!g) { alert('체크하거나 메모한 항목이 없다.'); return; }
+        copy(g.md, '복사했다. 세션에 붙여넣으면 기록으로 커밋된다.');
       });
 
       document.getElementById('rst').addEventListener('click', function () {

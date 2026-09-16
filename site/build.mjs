@@ -147,13 +147,16 @@ function parseRegion(file) {
   if (!m) fail(`${file}: 첫 줄이 '# N. 이름' 형식이 아니다: ${lines[0]}`);
   const estIdx = lines.findIndex((l) => /^## 추정/.test(l));
   const listIdx = lines.findIndex((l) => /^## 매물/.test(l));
-  const visitIdx = lines.findIndex((l) => /^## 임장/.test(l));
+  // `## 임장`(체크 항목)과 `## 임장 기록`(현장에서 올라온 회차)은 접두사가 같다 — 기록 절이 체크 표로 오인되면 안 된다
+  const visitIdx = lines.findIndex((l) => /^## 임장(?! 기록)/.test(l));
+  const logIdx = lines.findIndex((l) => /^## 임장 기록/.test(l));
   const secEnd = (from) => { const nx = lines.findIndex((l, k) => k > from && /^## /.test(l)); return nx < 0 ? lines.length : nx; };
-  const firstSec = [estIdx, visitIdx, listIdx].filter((k) => k >= 0).sort((a, b) => a - b)[0];
+  const firstSec = [estIdx, visitIdx, listIdx, logIdx].filter((k) => k >= 0).sort((a, b) => a - b)[0];
   const bodyLines = firstSec === undefined ? lines.slice(1) : lines.slice(1, firstSec);
   const estLines = estIdx < 0 ? [] : lines.slice(estIdx, secEnd(estIdx));
   const listLines = listIdx < 0 ? [] : lines.slice(listIdx, secEnd(listIdx));
   const visitLines = visitIdx < 0 ? [] : lines.slice(visitIdx, secEnd(visitIdx));
+  const logLines = logIdx < 0 ? [] : lines.slice(logIdx, secEnd(logIdx));
   const fields = {};
   const order = [];
   let cur = null;
@@ -173,7 +176,7 @@ function parseRegion(file) {
   const est = estIdx < 0 ? null : { heading: lines[estIdx], table: tableAfter(estLines, /^## 추정/, `${file} 추정`), text: estLines.join('\n') };
   const list = listIdx < 0 ? null : { heading: lines[listIdx], table: tableAfter(listLines, /^## 매물/, `${file} 매물`), note: listLines.slice(1).find((l) => l.trim() && !l.trim().startsWith('|')) || '', lines: listLines };
   const visit = visitIdx < 0 ? null : { heading: lines[visitIdx], table: tableAfter(visitLines, /^## 임장/, `${file} 임장`) };
-  return { no: Number(m[1]), file, headingTitle: m[2].trim(), visit, fields, order, est, list, md: text, bullets: bodyLines.filter((l) => /^- /.test(l)).length, bodyMd: bodyLines.join('\n').trim(), estMd: estLines.join('\n').trim(), listMd: listLines.join('\n').trim() };
+  return { no: Number(m[1]), file, headingTitle: m[2].trim(), visit, fields, order, est, list, md: text, bullets: bodyLines.filter((l) => /^- /.test(l)).length, bodyMd: bodyLines.join('\n').trim(), estMd: estLines.join('\n').trim(), listMd: listLines.join('\n').trim(), logMd: logLines.join('\n').trim() };
 }
 const regionFiles = readdirSync(path.join(ROOT, 'regions')).filter((f) => /^\d{2}_.+\.md$/.test(f)).sort();
 if (regionFiles.length === 0) fail('regions/ 에 NN_slug.md 파일이 없다');
@@ -294,6 +297,22 @@ function parseVisit(r) {
   if (!t) { warn(`${r.file}: ## 임장 아래 표가 없다`); return []; }
   for (const c of VISIT_COLS) if (!t.header.includes(c)) { warn(`${r.file}: 임장 표에 '${c}' 열이 없다`); return []; }
   return visitRows(t, r.file);
+}
+// ## 임장 기록 절 — 현장에서 올라온 회차. field.html 의 「제출」 → 이슈 → field-log 워크플로가 쌓는다(tools/apply_field_log.py).
+// 머리줄만 지키면 손으로 적은 회차도 읽힌다: `**YYYY-MM-DD · 이름** — 체크 N / M · [#12](url)`.
+// 등급은 C~D라 요약표·추정 블록의 어떤 계산에도 들어가지 않는다 — 여기서는 세고 보여 줄 뿐이다.
+function parseVisitLog(r) {
+  if (!r.logMd) return [];
+  const out = [];
+  r.logMd.split('\n').forEach((l, i) => {
+    const m = l.match(/^\*\*(\d{4}-\d{2}-\d{2})\s*·\s*(.+?)\*\*(.*)$/);
+    if (!m) return;
+    const cnt = m[3].match(/체크\s*(\d+)\s*\/\s*(\d+)/);
+    const iss = m[3].match(/\[#(\d+)\]\(([^)]+)\)/);
+    out.push({ date: m[1], name: strip(m[2]), done: cnt ? Number(cnt[1]) : null, total: cnt ? Number(cnt[2]) : null, issue: iss ? Number(iss[1]) : null, url: iss ? iss[2] : null, at: i });
+  });
+  if (!out.length) warn(`${r.file}: ## 임장 기록 절에 회차 머리줄(**YYYY-MM-DD · 이름**)이 없다`);
+  return out.sort((a, b) => (a.date === b.date ? a.at - b.at : a.date < b.date ? 1 : -1));   // 최신이 위
 }
 
 // 비교단지 한 줄 — 이름 · 입주연도 · 표본 수
@@ -473,7 +492,7 @@ const allCards = summary.rows.map((row) => {
     price, est, chain: estChain(r), toheo, trust: strip(row['신뢰도']), basis,
     questions: qs.map((q) => q.id), openIds: qs.filter((q) => !q.resolved).map((q) => q.id), open: qs.filter((q) => !q.resolved).length,
     riskShort, riskLine, riskLead: risk ? risk.tail || null : null, riskFirst, riskRest,
-    visit: parseVisit(r), listings: parseListings(r), bullets: r.bullets, bytes: Buffer.byteLength(r.md, 'utf8'), updated,
+    visit: parseVisit(r), visitLog: parseVisitLog(r), listings: parseListings(r), bullets: r.bullets, bytes: Buffer.byteLength(r.md, 'utf8'), updated,
   };
 });
 for (const q of questions) {
@@ -802,6 +821,12 @@ function regionPage(c, i) {
   const foldFacts = fold(`핵심 사실 · ${r.order.length}항목`, kv.html);
   const foldEst = ef ? fold('추정 시나리오 · 근거', ef.html) : '';
   const foldListings = lf ? fold(`매물 전체 ${ls.count}건 · 점수 근거`, lf) : '';
+  // 임장 기록은 '매수 전 확인' 바로 아래다 — 그 4종을 무엇으로 확인했는지가 현장 기록이다
+  const vl = c.visitLog;
+  const foldLog = vl.length
+    ? fold(`임장 기록 · ${vl.length}회 · 최근 ${vl[0].date}${vl[0].done !== null ? ` · 체크 ${vl[0].done} / ${vl[0].total}` : ''}`,
+      `<div class="cav" style="margin:0 0 8px">현장 관찰·중개사 발언은 C~D등급이다. 요약표·추정 블록의 계산에는 들어가지 않는다.</div><div data-md="md-log"></div>`)
+    : '';
   const foldQs = qs.length
     ? fold(`확인 중인 질문 ${openList.length}${qs.length - openList.length ? ` · 해소 ${qs.length - openList.length}` : ''}`,
       openList.length ? `<ul class="qlist">${openList.map((q) => `<li><b>${esc(q.id)}</b>${esc(q.what)}<small>${esc(q.where)} · ${esc(cut(q.status, 110))}</small></li>`).join('')}</ul>` : '<div class="cav">미해결 없음</div>')
@@ -811,10 +836,10 @@ function regionPage(c, i) {
     ...common, NAME: esc(c.name), SUB: esc([c.district, c.method, c.households].filter(Boolean).join(' · ')), NO: String(c.no), NO2: nn(c), SLUG: c.slug, UPDATED: c.updated, STYLE: c.style,
     FACTS: facts, TAGS: tagsHtml(c), STAGE: c.stageIdx === null ? `단계 미분류 · ${esc(c.stage)}` : '', STEPPER: stepper,
     MONEY: moneyHtml(c), JUDGE: judge, LISTINGS: listingsHtml, CHECKS: checks,
-    TOPLINKS: topLinks, FOLD_FACTS: foldFacts, FOLD_QS: foldQs, FOLD_EST: foldEst, FOLD_LISTINGS: foldListings,
+    TOPLINKS: topLinks, FOLD_FACTS: foldFacts, FOLD_QS: foldQs, FOLD_EST: foldEst, FOLD_LISTINGS: foldListings, FOLD_LOG: foldLog,
     PREV: prev ? `<a href="${nn(prev)}.html">‹ ${prev.no} ${esc(prev.name)}</a>` : '<span></span>',
     NEXT: next ? `<a href="${nn(next)}.html">${next.no} ${esc(next.name)} ›</a>` : '<span></span>',
-    MD_BLOCKS: [...kv.blocks, ef ? ef.block : ''].join('\n'),
+    MD_BLOCKS: [...kv.blocks, ef ? ef.block : '', vl.length ? mdBlock('log', r.logMd) : ''].join('\n'),
   });
 }
 
@@ -829,7 +854,11 @@ const fieldRulesHtml = fieldRules.length
   : '';
 const fieldData = {
   common: fieldGroups,
-  regions: cards.filter((c) => c.visit.length).map((c) => ({ key: c.key, no: c.no, name: c.name, items: c.visit })),
+  // logs — 이미 커밋된 회차. 제출이 실제로 남았는지를 현장에서 확인하는 유일한 신호다(localStorage 는 기기마다 따로다)
+  regions: cards.filter((c) => c.visit.length).map((c) => ({
+    key: c.key, no: c.no, name: c.name, items: c.visit,
+    logs: c.visitLog.map((l) => ({ date: l.date, done: l.done, total: l.total, url: l.url })),
+  })),
 };
 
 // ---------------------------------------------------------------- 쓰기
@@ -846,4 +875,4 @@ cards.forEach((c, i) => writeFileSync(path.join(OUT, 'regions', nn(c) + '.html')
 writeFileSync(path.join(OUT, 'data.json'), JSON.stringify({ registry, built, warnings, rules: { ltv: LTV, caps: CAPS, fee: !!feeText }, stages: STAGES.map((s) => s[0]), pills, cards, hidden, questions: shownQuestions, field: { version: fieldHead[1], updated: fieldHead[2], count: fieldCount, rules: fieldRules, groups: fieldGroups } }, null, 2));
 if (existsSync(path.join(ROOT, 'site', 'static'))) for (const f of readdirSync(path.join(ROOT, 'site', 'static'))) writeFileSync(path.join(OUT, f), readFileSync(path.join(ROOT, 'site', 'static', f)));
 
-console.log(`ok  ${registry.version} · ${cards.length}개 구역 · 임장 공통 ${fieldCount}(+규칙 ${fieldRules.length}) + 구역별 ${cards.reduce((a, c) => a + c.visit.length, 0)}${hidden.length ? ` · 숨김 ${hidden.map((h) => h.no + ' ' + h.name).join(' · ')}` : ''} · ${GROUPS.map(([, t, pred]) => `${t} ${cards.filter(pred).length}`).filter((s) => !/ 0$/.test(s)).join(' / ')} · 미해결 ${openUnique} · 경고 ${warnings.length}`);
+console.log(`ok  ${registry.version} · ${cards.length}개 구역 · 임장 공통 ${fieldCount}(+규칙 ${fieldRules.length}) + 구역별 ${cards.reduce((a, c) => a + c.visit.length, 0)} · 기록 ${cards.reduce((a, c) => a + c.visitLog.length, 0)}회${hidden.length ? ` · 숨김 ${hidden.map((h) => h.no + ' ' + h.name).join(' · ')}` : ''} · ${GROUPS.map(([, t, pred]) => `${t} ${cards.filter(pred).length}`).filter((s) => !/ 0$/.test(s)).join(' / ')} · 미해결 ${openUnique} · 경고 ${warnings.length}`);

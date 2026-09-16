@@ -113,6 +113,28 @@ cat data/listings/*.jsonl | jq -r 'select(.t=="zone") | [.date, .zone, .dedup, .
 
 ---
 
+## `data/field/YYYY-MM-DD.jsonl`
+
+임장 회차 원본. 임장 페이지(`field.html`)의 「제출」이 연 이슈를 `tools/apply_field_log.py` 가 받아 쌓는다.
+`data/listings` 와 달리 **같은 날 파일에 이어붙인다**(append) — 같은 구역을 하루에 두 번 가는 것이 정상이고
+(30 규칙 E4 평일 낮·밤), 회차 자체가 사건이라 덮어쓰면 무엇을 언제 봤는지가 사라진다. 회차는 `issue` 로 유일하다.
+
+구역당 **visit 1행 + item N행**. 체크하지도 메모하지도 않은 항목은 제출에 실리지 않아 행이 없다 —
+"안 봤다"와 "보고 아니었다"는 다르고, 뒤엣것은 `checked: false` 에 메모가 남는다.
+
+| `t` | 키 |
+| :-- | :-- |
+| `visit` | `zone` `no` `title` `date` `issue` `url` · `checked`(체크 수) `total`(그 구역치 전부 = 공통 + 특이사항) `reported`(제출된 행 수) |
+| `item` | `zone` `date` `issue` `id` `checked` `memo` |
+
+**등급은 C~D다.** 현장 관찰·중개사 발언이며 요약표·추정 블록의 어떤 계산에도 넣지 않는다(`00_PROJECT_BRIEF.md` §6).
+현장에서 등급을 올릴 수 있는 것은 구청·조합이 내주는 문서 원본뿐이다.
+
+`id` 는 `30_FIELD_CHECKLIST.md`·구역 파일 `## 임장` 절의 고정 키다. **ID 를 바꾸면 과거 회차와 이어지지 않는다.**
+항목을 빼도 ID 는 비워 둔다.
+
+---
+
 ## 왜 DB 가 아닌가
 
 10구역 · 회차당 수백 행 규모에서 DB 가 풀어 줄 문제가 없다. 파일로 두면 비용 0, diff 리뷰 유지,
