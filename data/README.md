@@ -122,10 +122,18 @@ cat data/listings/*.jsonl | jq -r 'select(.t=="zone") | [.date, .zone, .dedup, .
 구역당 **visit 1행 + item N행**. 체크하지도 메모하지도 않은 항목은 제출에 실리지 않아 행이 없다 —
 "안 봤다"와 "보고 아니었다"는 다르고, 뒤엣것은 `checked: false` 에 메모가 남는다.
 
+**한 회차에는 그때 바뀐 것만 온다**(2026-09-17). 임장 페이지가 이미 커밋된 항목을 다시 싣지 않기 때문이다.
+그래서 **이 파일이 체크·메모의 단일 원본**이 된다 — 페이지는 여기를 회차순으로 병합해(나중 회차가 이긴다)
+화면의 바탕으로 깔고, 로컬에는 아직 제출하지 않은 편집만 둔다. 기기가 달라도 같은 것을 보는 경로가 이것 하나다.
+`site/build.mjs` 의 `loadFieldHistory()` 와 `tools/apply_field_log.py` 의 `load_history()` 가 **같은 규칙**으로 읽는다.
+
 | `t` | 키 |
 | :-- | :-- |
-| `visit` | `zone` `no` `title` `date` `issue` `url` · `checked`(체크 수) `total`(그 구역치 전부 = 공통 + 특이사항) `reported`(제출된 행 수) |
+| `visit` | `zone` `no` `title` `date` `issue` `url` · `checked`(이 회차에서 체크한 수) `cum`(이 회차까지 누적 체크) `total`(그 구역치 전부 = 공통 + 특이사항) `reported`(제출된 행 수) |
 | `item` | `zone` `date` `issue` `id` `checked` `memo` |
+
+`checked` 와 `cum` 이 둘 다 필요하다 — `checked` 만 두면 나중에 "그날 뭘 했나"를 못 읽고,
+`cum` 만 두면 회차가 사건이 아니라 스냅샷이 된다. `cum` 은 2026-09-17부터 붙는다(그 전 행에는 없다).
 
 **등급은 C~D다.** 현장 관찰·중개사 발언이며 요약표·추정 블록의 어떤 계산에도 넣지 않는다(`00_PROJECT_BRIEF.md` §6).
 현장에서 등급을 올릴 수 있는 것은 구청·조합이 내주는 문서 원본뿐이다.

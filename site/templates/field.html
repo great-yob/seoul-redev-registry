@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>임장 체크 · 서울 재개발 구역 레지스트리</title>
-  <meta name="description" content="한 구역치 체크리스트 — 공통 {{FIELD_COUNT}}항목 + 그 구역만의 특이사항. 체크와 메모는 이 브라우저에만 저장된다.">
+  <meta name="description" content="한 구역치 체크리스트 — 공통 {{FIELD_COUNT}}항목 + 그 구역만의 특이사항. 제출한 체크·메모는 모든 기기에서 같이 보인다.">
   <link rel="stylesheet" href="site.css">
 </head>
 
@@ -32,7 +32,7 @@
     <footer>
       <span>원문보기 <a href="https://github.com/{{REPO}}/blob/main/30_FIELD_CHECKLIST.md" target="_blank"
           rel="noopener">원본문서-공통사항</a></span>
-      <span><br>체크·메모는 <b>이 브라우저에만</b> 저장된다.<br>임장이 끝나면 <b>제출</b>을 눌러야 기록이 남는다.</span>
+      <span><br>제출한 체크·메모는 <b>모든 기기</b>에서 같이 보인다.<br>아직 제출하지 않은 편집은 <b>이 브라우저</b>에만 있다.</span>
     </footer>
   </div>
 
@@ -41,23 +41,68 @@
     <span id="pgt">0 / 0</span>
     <button id="sub">제출</button>
     <button id="exp" class="gh">복사</button>
-    <button id="rst" class="gh">초기화</button>
+    <button id="rst" class="gh">되돌리기</button>
   </div>
 
   <script type="application/json" id="fdata">{{DATA}}</script>
   <script>
     (function () {
       var D = JSON.parse(document.getElementById('fdata').textContent);
-      // v1 은 공통 체크를 'common' 한 곳에 담아 구역이 달라도 같은 체크가 보였다. 저장 단위를 구역으로 바꾸며 키를 올린다.
+      // 상태는 2층이다.
+      //   base  — **커밋된** 체크·메모. 빌드가 `data/field/*.jsonl` 을 회차순으로 병합해 구워 넣는다.
+      //           어느 기기에서 열어도 같은 것이 보인다. 이것이 동기화의 전부다.
+      //   local — 아직 **제출하지 않은** 편집만. 이 브라우저에만 있고, 커밋돼 내려오면 prune() 이 털어낸다.
+      // 저장소가 공개라 페이지에 쓰기 토큰을 둘 수 없다 — 동기화 경로는 「제출 → 커밋 → 재배포」(1~2분) 하나뿐이다.
+      // v2 는 전체 상태를 로컬에 담았다. 같은 모양이라 키는 그대로 두고, prune() 이 커밋본과 겹치는 것을 한 번에 접는다.
       var KEY = 'redev-field-v2';
+      var SENT = 'redev-field-sent';
       var state = load();
       var region = null, tab = 'common';
-      var COMMON_N = D.common.reduce(function (a, g) { return a + g.items.length; }, 0);
+      var COMMON = D.common.reduce(function (a, g) { return a.concat(g.items); }, []);
+      var COMMON_N = COMMON.length;
 
       function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } }
-      // 제출 이력 — 이 브라우저 기준. 올리고 돌아왔을 때 흔적이 없으면 같은 구역을 두 번 올리게 된다.
-      // 확정 기록은 여기가 아니라 구역 md 의 `## 임장 기록` 절(= region.logs)에 있다.
-      var SENT = 'redev-field-sent';
+      function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* 사파리 시크릿 모드·용량 초과 */ } }
+      function regionOf(key) { for (var i = 0; i < D.regions.length; i++) if (D.regions[i].key === key) return D.regions[i]; return null; }
+      function itemsOf(r) { return COMMON.concat(r.items); }   // 한 구역치 = 공통 + 그 구역 특이사항
+
+      // 저장 단위는 구역이다 — 공통 항목(A1…)도 그 구역 밑에 들어간다.
+      // 답십리489에서 계량기를 센 것이 자양655에서도 세어진 것으로 보이면 안 된다.
+      function baseOf(r, id) { return (r && r.base && r.base[id]) || null; }
+      function locOf(r, id) { var b = r && state[r.key]; return (b && b[id]) || null; }
+      function effOf(r, id) {   // 화면에 보이는 값 = 커밋된 것 위에 미제출 편집을 얹은 것
+        var l = locOf(r, id);
+        if (l) return { c: l.c ? 1 : 0, m: l.m || '' };
+        var b = baseOf(r, id);
+        return b ? { c: b.c ? 1 : 0, m: b.m || '' } : { c: 0, m: '' };
+      }
+      function eq(v, b) { return !!v.c === !!(b && b.c) && (v.m || '') === ((b && b.m) || ''); }
+      // 커밋된 것과 같아지면 편집을 지운다 — 더 보낼 것이 없다는 뜻이고, 그래야 '미제출'이 거짓말을 하지 않는다
+      function put(id, v) {
+        var b = (state[region.key] = state[region.key] || {});
+        if (eq(v, baseOf(region, id))) delete b[id];
+        else b[id] = { c: v.c ? 1 : 0, m: v.m || '' };
+        if (!Object.keys(b).length) delete state[region.key];
+        save();
+      }
+      // 로드할 때 한 번 — 커밋본과 같아진 편집과 개정으로 사라진 ID 를 턴다. 남는 것이 '미제출'의 정의다.
+      // 모르는 구역 키(숨긴 구역)는 건드리지 않는다 — 되살아날 수 있다.
+      function prune() {
+        D.regions.forEach(function (r) {
+          var b = state[r.key];
+          if (!b) return;
+          var live = {};
+          itemsOf(r).forEach(function (it) { live[it.id] = 1; });
+          Object.keys(b).forEach(function (id) { if (!live[id] || eq(b[id], baseOf(r, id))) delete b[id]; });
+          if (!Object.keys(b).length) delete state[r.key];
+        });
+        save();
+      }
+      function pending(r) { return Object.keys(state[r.key] || {}).length; }
+      function doneOf(r) { var n = 0; itemsOf(r).forEach(function (it) { if (effOf(r, it.id).c) n++; }); return n; }
+
+      // 제출 흔적 — 이 브라우저 기준. 올린 것이 아직 커밋되지 않은 동안(재배포 1~2분) 같은 것을 두 번 올리지 않게 한다.
+      // 확정 기록은 여기가 아니라 base(= 커밋된 체크)와 구역 md 의 `## 임장 기록` 절에 있다.
       function sentAll() { try { return JSON.parse(localStorage.getItem(SENT)) || {}; } catch (e) { return {}; } }
       function markSent(date, n) {
         var s = sentAll();
@@ -65,31 +110,16 @@
         try { localStorage.setItem(SENT, JSON.stringify(s)); } catch (e) { /* 사파리 시크릿 모드 */ }
         progress();
       }
-      // 렌더할 때마다 rec() 가 빈 칸을 만들어 두므로, 저장 직전에 체크도 메모도 없는 항목은 털어낸다
-      function save() {
-        var out = {};
-        Object.keys(state).forEach(function (s) {
-          var b = {};
-          Object.keys(state[s] || {}).forEach(function (id) { var x = state[s][id]; if (x && (x.c || x.m)) b[id] = x; });
-          if (Object.keys(b).length) out[s] = b;
-        });
-        try { localStorage.setItem(KEY, JSON.stringify(out)); } catch (e) { /* 사파리 시크릿 모드·용량 초과 */ }
-      }
-      // 저장 단위는 구역이다 — 공통 항목(A1…)도 그 구역 밑에 들어간다.
-      // 답십리489에서 계량기를 센 것이 자양655에서도 세어진 것으로 보이면 안 된다.
-      function rec(id) {
-        var b = (state[region.key] = state[region.key] || {});
-        return (b[id] = b[id] || { c: 0, m: '' });
-      }
-      function regionOf(key) { for (var i = 0; i < D.regions.length; i++) if (D.regions[i].key === key) return D.regions[i]; return null; }
-      // 칩 배지 — 구역마다 '체크 / 그 구역치 전부'. 어느 구역을 어디까지 봤는지 한 줄로 읽힌다.
-      // rec() 와 달리 빈 칸을 만들지 않는다(선택하지 않은 구역까지 state 에 생기면 저장이 지저분해진다)
+
+      // 칩 배지 — 구역마다 '체크 / 그 구역치 전부'. 커밋된 것과 미제출을 합친 수다.
+      // 미제출이 남은 구역은 배지를 강조색으로 — 어느 구역을 아직 안 올렸는지가 한눈에 보여야 한다.
       function chips() {
         D.regions.forEach(function (r) {
-          var b = state[r.key] || {}, done = 0, all = COMMON_N + r.items.length;
-          Object.keys(b).forEach(function (id) { if (b[id] && b[id].c) done++; });
-          var el = document.querySelector('.fchips a[data-k="' + r.key + '"] small');
-          if (el) el.textContent = done ? done + ' / ' + all : String(all);
+          var a = document.querySelector('.fchips a[data-k="' + r.key + '"]');
+          if (!a) return;
+          var all = COMMON_N + r.items.length, done = doneOf(r);
+          a.querySelector('small').textContent = done ? done + ' / ' + all : String(all);
+          a.classList.toggle('dirty', !!pending(r));
         });
       }
       function groups() {
@@ -97,8 +127,23 @@
           ? D.common.map(function (g) { return { title: g.id + '. ' + g.title, items: g.items }; })
           : [{ title: region.name + ' 특이사항', items: region.items }];
       }
-      function countOf(list) { var d = 0; list.forEach(function (it) { if (rec(it.id).c) d++; }); return d; }
       function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+      // 항목 꼬리표 — 커밋된 것은 그 날짜, 미제출 편집은 '미제출'. 무엇이 이미 남았고 무엇이 아직 이 기기에만 있는지.
+      function markText(id) {
+        var l = locOf(region, id), b = baseOf(region, id);
+        return l ? '미제출' : (b ? String(b.date || '').slice(5).replace('-', '/') : '');
+      }
+      function mark(li, id) {
+        var ti = li.querySelector('.ti'), el = ti.querySelector('.mk'), txt = markText(id);
+        if (!el) {
+          if (!txt) return;
+          el = document.createElement('em');
+          ti.appendChild(el);
+        }
+        el.className = 'mk' + (locOf(region, id) ? ' new' : '');
+        el.textContent = txt;
+        el.hidden = !txt;
+      }
 
       function render() {
         var has = !!region;
@@ -113,12 +158,13 @@
         groups().forEach(function (g) {
           html += '<div class="fg"><b>' + esc(g.title) + '</b></div><ul class="fl">';
           g.items.forEach(function (it) {
-            var r = rec(it.id), on = !!r.c;
+            var e = effOf(region, it.id), on = !!e.c, txt = markText(it.id);
             html += '<li class="fi' + (on ? ' on' : '') + '" data-i="' + esc(it.id) + '">'
               + '<button class="bx" aria-pressed="' + on + '" aria-label="' + esc(it.what) + '"></button>'
-              + '<div class="bd"><div class="ti"><i>' + esc(it.id) + '</i>' + esc(it.what) + '</div>'
+              + '<div class="bd"><div class="ti"><i>' + esc(it.id) + '</i>' + esc(it.what)
+              + (txt ? '<em class="mk' + (locOf(region, it.id) ? ' new' : '') + '">' + esc(txt) + '</em>' : '') + '</div>'
               + '<details><summary>현장에서 · 왜</summary><p><b>현장에서</b> ' + esc(it.how) + '</p><p><b>왜</b> ' + esc(it.why) + '</p></details>'
-              + ((on || r.m) ? '<textarea rows="2" placeholder="확인한 내용을 적는다">' + esc(r.m) + '</textarea>' : '')
+              + ((on || e.m) ? '<textarea rows="2" placeholder="확인한 내용을 적는다">' + esc(e.m) + '</textarea>' : '')
               + '</div></li>';
           });
           html += '</ul>';
@@ -130,41 +176,49 @@
       // 진행률은 한 구역치로 센다 — 공통과 특이사항을 합친 것이 그 구역 임장의 전부다
       function progress() {
         if (!region) return;
-        var cDone = 0;
-        D.common.forEach(function (g) { cDone += countOf(g.items); });
-        var rDone = countOf(region.items), all = COMMON_N + region.items.length, done = cDone + rDone;
+        var cDone = 0, rDone = 0;
+        COMMON.forEach(function (it) { if (effOf(region, it.id).c) cDone++; });
+        region.items.forEach(function (it) { if (effOf(region, it.id).c) rDone++; });
+        var all = COMMON_N + region.items.length, done = cDone + rDone, p = pending(region);
         document.querySelector('.ftabs .cn').textContent = cDone + ' / ' + COMMON_N;
         document.querySelector('.ftabs .rn').textContent = rDone + ' / ' + region.items.length;
         document.getElementById('pgt').textContent = done + ' / ' + all;
         document.getElementById('pgi').style.width = all ? (100 * done / all).toFixed(1) + '%' : '0';
         chips();
         var logs = region.logs || [], s = sentAll()[region.key];
-        document.getElementById('note').textContent = region.name + ' — 공통 ' + COMMON_N + ' + 특이사항 ' + region.items.length + ' = 이 구역치 ' + all + '항목. 체크·메모는 구역마다 따로 쌓인다.'
-          + (logs.length ? ' 커밋된 기록 ' + logs.length + '회(최근 ' + logs[0].date + ').' : '')
-          + (s ? ' 이 기기에서 ' + s.d + ' 에 ' + s.n + '항목 제출했다.' : '');
+        var t = region.name + ' — 공통 ' + COMMON_N + ' + 특이사항 ' + region.items.length + ' = 이 구역치 ' + all + '항목.'
+          + (logs.length ? ' 커밋된 기록 ' + logs.length + '회(최근 ' + logs[0].date + ') — 모든 기기에서 같이 보인다.' : ' 아직 커밋된 기록이 없다.')
+          + (p ? ' 이 기기에만 있는 미제출 ' + p + '항목 — 「제출」해야 남는다.' : '');
+        if (s) t += ' 이 기기에서 ' + s.d + ' 에 ' + s.n + '항목 제출했다' + (p ? ' — 커밋되면 미제출 표시가 사라진다.' : '.');
+        document.getElementById('note').textContent = t;
       }
 
       // 체크 상자만이 아니라 제목 줄도 탭 대상이다 — 장갑 낀 손으로 28px 상자를 겨누게 하지 않는다
       document.getElementById('panel').addEventListener('click', function (e) {
         var hit = e.target.closest('.bx, .ti');
         if (!hit) return;
-        var li = hit.closest('.fi'), box = li.querySelector('.bx'), r = rec(li.dataset.i);
-        r.c = r.c ? 0 : 1;
-        save();
-        li.classList.toggle('on', !!r.c);
-        box.setAttribute('aria-pressed', !!r.c);
+        var li = hit.closest('.fi'), id = li.dataset.i, box = li.querySelector('.bx');
+        var v = effOf(region, id);
+        v = { c: v.c ? 0 : 1, m: v.m };
+        put(id, v);
+        li.classList.toggle('on', !!v.c);
+        box.setAttribute('aria-pressed', !!v.c);
+        mark(li, id);
         var ta = li.querySelector('textarea');
-        if (r.c && !ta) {
+        if (v.c && !ta) {
           ta = document.createElement('textarea');
           ta.rows = 2; ta.placeholder = '확인한 내용을 적는다';
+          ta.value = v.m || '';
           li.querySelector('.bd').appendChild(ta);   // 자동 포커스는 하지 않는다 — 연속 체크 중 키보드가 튀어오른다
-        } else if (!r.c && ta && !ta.value.trim()) ta.remove();
+        } else if (!v.c && ta && !ta.value.trim()) ta.remove();
         progress();
       });
       document.getElementById('panel').addEventListener('input', function (e) {
         if (e.target.tagName !== 'TEXTAREA') return;
-        rec(e.target.closest('.fi').dataset.i).m = e.target.value;
-        save();
+        var li = e.target.closest('.fi'), id = li.dataset.i;
+        put(id, { c: effOf(region, id).c, m: e.target.value });
+        mark(li, id);
+        progress();
       });
 
       document.querySelectorAll('.ftabs button').forEach(function (b) {
@@ -186,7 +240,9 @@
         });
       });
 
-      // 한 구역치 기록을 두 벌로 만든다.
+      // 제출은 **이번에 바뀐 것만** 싣는다(= 미제출 편집).
+      // 회차는 그 방문에서 새로 확인한 것이다 — 이미 커밋된 항목을 매번 다시 올리면 회차가 전체 복사본이 되고,
+      // 구역 md 의 `## 임장 기록` 절이 같은 줄로 불어난다. 커밋된 체크는 base 로 이미 모든 기기에 있다.
       //   payload — 이슈 본문. ID·체크·메모만 싣는다. 항목 문구는 워크플로가 30_FIELD_CHECKLIST.md 에서 ID 로 복원한다.
       //             한글은 URL 인코딩되면 글자당 9바이트라 문구까지 실으면 이슈 프리필 한계(8KB)를 넘긴다.
       //   md      — 클립보드용 전문. 신호가 없거나 본문이 길 때 쓰는 대비책이다.
@@ -195,11 +251,11 @@
         pay.push('<!-- field-log v1 key=' + region.key + ' date=' + today + ' -->', '');
         md.push('## 임장 기록 — ' + region.name + ' (' + today + ')', '');
         function block(title, list) {
-          var any = list.filter(function (it) { var x = rec(it.id); return x.c || x.m; });
+          var any = list.filter(function (it) { return !!locOf(region, it.id); });
           if (!any.length) return;
           md.push('**' + title + '**', '');
           any.forEach(function (it) {
-            var x = rec(it.id), m = x.m ? x.m.replace(/\s*\n\s*/g, ' / ').trim() : '';
+            var x = locOf(region, it.id), m = x.m ? x.m.replace(/\s*\n\s*/g, ' / ').trim() : '';
             n++;
             pay.push(it.id + ' ' + (x.c ? 'x' : '-') + (m ? ' ' + m : ''));
             md.push('- [' + (x.c ? 'x' : ' ') + '] ' + it.id + ' ' + it.what + (m ? ' — ' + m : ''));
@@ -224,7 +280,7 @@
       var ISSUE = 'https://github.com/{{REPO}}/issues/new';
       document.getElementById('sub').addEventListener('click', function () {
         var g = collect();
-        if (!g) { alert('체크하거나 메모한 항목이 없다.'); return; }
+        if (!g) { alert('이번에 새로 체크하거나 바꾼 항목이 없다. 커밋된 기록은 이미 올라가 있다.'); return; }
         var url = ISSUE + '?labels=field-log&title=' + encodeURIComponent(g.title) + '&body=' + encodeURIComponent(g.payload);
         if (url.length > 6000) {   // 프리필 URL 한계 — 본문은 클립보드로 넘기고 빈 폼만 연다
           copy(g.payload, '메모가 길어 본문을 복사했다. 열리는 이슈 폼에 붙여넣고 제출한다.');
@@ -236,17 +292,22 @@
       // 복사 — 예전 경로. 신호가 없는 현장에서 쓰고, 나중에 세션에 붙여넣는다
       document.getElementById('exp').addEventListener('click', function () {
         var g = collect();
-        if (!g) { alert('체크하거나 메모한 항목이 없다.'); return; }
+        if (!g) { alert('이번에 새로 체크하거나 바꾼 항목이 없다. 커밋된 기록은 이미 올라가 있다.'); return; }
         copy(g.md, '복사했다. 세션에 붙여넣으면 기록으로 커밋된다.');
       });
 
+      // 되돌리기 — 지우는 것은 **이 기기의 미제출 편집**뿐이다.
+      // 커밋된 기록은 페이지에서 지우지 않는다: 잘못 올렸으면 항목을 풀고 다시 제출해 다음 회차로 정정한다.
       document.getElementById('rst').addEventListener('click', function () {
         if (!region) return;
-        if (!window.confirm(region.name + ' 기록을 전부 지운다 (공통 + 특이사항). 되돌릴 수 없다.')) return;
-        state[region.key] = {};
+        var p = pending(region);
+        if (!p) { alert('이 기기에 미제출 편집이 없다. 커밋된 기록은 여기서 지우지 않는다 — 항목을 풀고 「제출」하면 다음 회차로 정정된다.'); return; }
+        if (!window.confirm(region.name + ' 의 미제출 편집 ' + p + '항목을 버린다. 커밋된 기록은 그대로다. 되돌릴 수 없다.')) return;
+        delete state[region.key];
         save(); render();
       });
 
+      prune();
       var pre = (location.search.match(/[?&]r=([^&]+)/) || [])[1];
       var a0 = pre && document.querySelector('.fchips a[data-k="' + decodeURIComponent(pre).replace(/["\\]/g, '') + '"]');
       if (a0) a0.click(); else render();

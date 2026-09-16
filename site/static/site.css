@@ -200,6 +200,10 @@ footer a { color: var(--accent); }
 .ck .box.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .ck .box.half { background: var(--warn-bg); border-color: var(--g-c); color: var(--warn-ink); }
 .ck span { color: var(--ink-3); font-size: 11.5px; margin-left: auto; text-align: right; }
+/* 임장 기록 한 줄 — 구역 페이지는 '얼마나 봤는지'만 말한다. 항목·메모는 field.html, 회차 전문은 md·이슈에 있다(2026-09-17) */
+.logline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 9px 12px; margin-top: 6px; min-height: 40px; font-size: 13px; color: var(--ink-2); }
+.logline b { color: var(--ink); font-weight: 600; }
+.logline a { margin-left: auto; font-size: 12px; color: var(--accent); white-space: nowrap; }
 .fold { border: 1px solid var(--line); border-radius: 10px; margin-top: 6px; background: var(--surface); }
 .fold summary { list-style: none; cursor: pointer; padding: 9px 12px; font-size: 13px; display: flex; justify-content: flex-start; gap: 6px; min-height: 40px; align-items: center; }
 .fold summary::-webkit-details-marker { display: none; }
@@ -291,6 +295,11 @@ ul.chain li { margin: 3px 0; }
 .fi .ti { font-size: 14px; line-height: 1.4; color: var(--ink); cursor: pointer; }
 .fi.on .ti { color: var(--ok-ink); }
 .fi .ti i { font-style: normal; font-size: 10.5px; font-weight: 700; color: var(--ink-3); margin-right: 6px; font-variant-numeric: tabular-nums; }
+/* 항목 꼬리표 — 커밋된 것은 날짜(전 기기 공통), 아직 제출 안 한 편집은 '미제출'(이 기기에만) */
+.fi .ti em.mk { font-style: normal; font-size: 10px; color: var(--ink-3); background: var(--surface-2); border-radius: 99px; padding: 1px 6px; margin-left: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fi .ti em.mk.new { color: var(--accent); background: var(--accent-soft); }
+.fchips a.dirty small { color: var(--accent); }
+.fchips a.sel.dirty small { color: #fff; }
 .fi.on .ti i { color: var(--ok-ink); opacity: .7; }
 .fi details { margin-top: 3px; }
 .fi summary { list-style: none; cursor: pointer; font-size: 11.5px; color: var(--accent); padding: 4px 0; min-height: 26px; }
