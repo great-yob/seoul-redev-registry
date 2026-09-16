@@ -539,7 +539,7 @@ const lead = `서울 ${seoulCount} · 서울 외 ${cards.length - seoulCount} ·
 const chip = (c) => `<a class="chip ${c.style}" href="regions/${nn(c)}.html">${esc(c.name)}${c.unverified ? ' <small>△</small>' : ''}</a>`;
 const stagemap = STAGES.map(([nm, sub], i) => {
   const here = cards.filter((c) => c.stageIdx === i);
-  return `<div class="vrow${here.length ? '' : ' empty'}"><div class="st">${esc(nm)}<small>${i} · ${esc(sub)}</small></div><div class="ch">${here.map(chip).join('')}</div></div>`;
+  return `<div class="vrow${here.length ? '' : ' empty'}"><div class="st"><i>${i}</i>${esc(nm)}<small>${esc(sub)}</small></div><div class="ch">${here.map(chip).join('')}</div></div>`;
 }).join('') + (cards.some((c) => c.stageIdx === null) ? `<div class="vrow warn"><div class="st">단계 미분류<small>키워드 표 갱신 필요</small></div><div class="ch">${cards.filter((c) => c.stageIdx === null).map(chip).join('')}</div></div>` : '');
 
 const pillsHtml = pills.map((p) => `<details class="pill"><summary>${p.short}</summary><p>${esc(p.detail)}</p></details>`).join('');
@@ -570,15 +570,15 @@ function card(c) {
 // 그룹은 단계 구간. 순위표가 아니다 — 같은 그룹 안에서도 번호순.
 const GROUPS = [
   ['early', '정비구역 지정 전', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx <= 2],
-  ['mid', '지정 후 · 관리처분 전', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx >= 3 && c.stageIdx <= 5],
+  ['mid', '지정 후, 관리처분 전', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx >= 3 && c.stageIdx <= 5],
   ['late', '관리처분 이후', (c) => c.seoul !== false && c.stageIdx !== null && c.stageIdx >= 6],
   ['unk', '단계 미분류', (c) => c.seoul !== false && c.stageIdx === null],
   ['out', '서울 외', (c) => c.seoul === false],
 ];
-const groupsHtml = GROUPS.map(([g, title, sub, pred]) => {
+const groupsHtml = GROUPS.map(([g, title, pred]) => {
   const cs = cards.filter(pred);
   if (!cs.length) return '';
-  return `<section class="grp"><div class="grp-h"><b>${esc(title)} · ${cs.length}</b><span>${esc(sub)}</span></div><div class="cards">${cs.map(card).join('')}</div></section>`;
+  return `<section class="grp"><div class="grp-h"><b>${esc(title)} · ${cs.length}</b></div><div class="cards">${cs.map(card).join('')}</div></section>`;
 }).join('');
 
 const built = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
@@ -838,4 +838,4 @@ cards.forEach((c, i) => writeFileSync(path.join(OUT, 'regions', nn(c) + '.html')
 writeFileSync(path.join(OUT, 'data.json'), JSON.stringify({ registry, built, warnings, rules: { ltv: LTV, caps: CAPS, fee: !!feeText }, stages: STAGES.map((s) => s[0]), pills, cards, hidden, questions: shownQuestions, field: { version: fieldHead[1], updated: fieldHead[2], count: fieldCount, rules: fieldRules, groups: fieldGroups } }, null, 2));
 if (existsSync(path.join(ROOT, 'site', 'static'))) for (const f of readdirSync(path.join(ROOT, 'site', 'static'))) writeFileSync(path.join(OUT, f), readFileSync(path.join(ROOT, 'site', 'static', f)));
 
-console.log(`ok  ${registry.version} · ${cards.length}개 구역 · 임장 공통 ${fieldCount}(+규칙 ${fieldRules.length}) + 구역별 ${cards.reduce((a, c) => a + c.visit.length, 0)}${hidden.length ? ` · 숨김 ${hidden.map((h) => h.no + ' ' + h.name).join(' · ')}` : ''} · ${GROUPS.map(([, t, , pred]) => `${t} ${cards.filter(pred).length}`).filter((s) => !/ 0$/.test(s)).join(' / ')} · 미해결 ${openUnique} · 경고 ${warnings.length}`);
+console.log(`ok  ${registry.version} · ${cards.length}개 구역 · 임장 공통 ${fieldCount}(+규칙 ${fieldRules.length}) + 구역별 ${cards.reduce((a, c) => a + c.visit.length, 0)}${hidden.length ? ` · 숨김 ${hidden.map((h) => h.no + ' ' + h.name).join(' · ')}` : ''} · ${GROUPS.map(([, t, pred]) => `${t} ${cards.filter(pred).length}`).filter((s) => !/ 0$/.test(s)).join(' / ')} · 미해결 ${openUnique} · 경고 ${warnings.length}`);
