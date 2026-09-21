@@ -56,7 +56,7 @@ ZONES = [
     dict(name='jangwi15', did='2327', title='장위15', file='04_jangwi15', basedate=None, anchor='233-42 실거래 10.00억(2026-06, 대지권 61.32㎡, A)'),
     dict(name='sangdo16', did='3691', title='상도16', file='05_sangdo16', basedate='2025-05-23', anchor='구역 내 실거래 중앙값 4.60억 · 대지권27㎡+ 중앙값 5.70억(A)'),
     dict(name='galhyeon510-1', did='4640', title='갈현동 510-1', file='06_galhyeon510-1', basedate='2026-07-01', anchor='폴리곤 대조 구역 내 78건 중앙값 2.51억(2026, A) · 실거래/공시 배율 중앙 1.92(n=69, A)'),
-    dict(name='sutaek2', did='4074', title='수택2', file='07_sutaek2', basedate='2023-07-13', anchor='구역계 근사 98건 중앙값 3.80억(2026, A)'),
+    dict(name='sutaek2', did='4074', title='수택2', file='07_sutaek2', basedate='2023-07-14', anchor='폴리곤 대조 구역 내 149건 중앙값 4.35억(2026, A) · 고시 권리자 분양가 35평형 6.77억·보정률 1.65·비례율 108.13%(고시 제2023-94호, A)'),
     dict(name='daejo212', did='4577', title='대조동 212', file='08_daejo212', basedate=None, anchor='폴리곤 대조 구역 내 52건 중앙값 3.23억(2026, A) · 권리산정기준일 미지정'),
     dict(name='guui2donga', did='4141', title='구의동 46', file='09_guui2dong46', basedate='2026-01-27', anchor='폴리곤 대조 구역 내 58건 중앙값 5.70억(2026, A) · 실거래/공시 배율 중앙 3.19(n=59, A) · 토허 대상'),
 ]
