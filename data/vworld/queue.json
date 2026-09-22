@@ -1533,8 +1533,8 @@
       "source": "vworld-cadastral+polygon",
       "cadence": "once",
       "priority": 1,
-      "status": "partial",
-      "cursor": 23,
+      "status": "done",
+      "cursor": 378,
       "parcels": [
         "294-59",
         "294-88",
@@ -1925,6 +1925,14 @@
           "empty": 9,
           "trunc": null,
           "blocked": "api:URL_TYPE"
+        },
+        {
+          "date": "2026-09-22",
+          "calls": 355,
+          "ok": 230,
+          "empty": 125,
+          "trunc": null,
+          "blocked": null
         }
       ]
     },
@@ -1937,8 +1945,8 @@
       "source": "vworld-cadastral+polygon",
       "cadence": "once",
       "priority": 2,
-      "status": "queued",
-      "cursor": 0,
+      "status": "done",
+      "cursor": 378,
       "parcels": [
         "294-59",
         "294-88",
@@ -2319,7 +2327,18 @@
         "532-1",
         "536"
       ],
-      "goal": "답십리489 개별공시지가 전량 — v1.9의 128필지(489 본번만)를 관리지역 378필지로 확대. 구역 중앙 407만원/㎡의 모집단이 구역의 34%였다"
+      "goal": "답십리489 개별공시지가 전량 — v1.9의 128필지(489 본번만)를 관리지역 378필지로 확대. 구역 중앙 407만원/㎡의 모집단이 구역의 34%였다",
+      "last_run": "2026-09-22",
+      "runs": [
+        {
+          "date": "2026-09-22",
+          "calls": 378,
+          "ok": 378,
+          "empty": 0,
+          "trunc": null,
+          "blocked": null
+        }
+      ]
     },
     {
       "id": "q30-dapsimni489-aptprice",
@@ -2330,8 +2349,8 @@
       "source": "vworld-cadastral+polygon",
       "cadence": "once",
       "priority": 3,
-      "status": "queued",
-      "cursor": 0,
+      "status": "done",
+      "cursor": 378,
       "parcels": [
         "294-59",
         "294-88",
@@ -2712,7 +2731,18 @@
         "532-1",
         "536"
       ],
-      "goal": "답십리489 공동주택가격 — 관리지역 내 연립다세대(320-28 테라스테이 등) 호별 공시가격. 연립다세대 실거래와 전용·층 매칭"
+      "goal": "답십리489 공동주택가격 — 관리지역 내 연립다세대(320-28 테라스테이 등) 호별 공시가격. 연립다세대 실거래와 전용·층 매칭",
+      "last_run": "2026-09-22",
+      "runs": [
+        {
+          "date": "2026-09-22",
+          "calls": 378,
+          "ok": 3,
+          "empty": 375,
+          "trunc": null,
+          "blocked": null
+        }
+      ]
     },
     {
       "id": "q30-jayang655-aptprice-2026",
