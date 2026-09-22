@@ -32,7 +32,7 @@ jobs:
       - name: Install deps
         run: pip install requests
 
-      - name: Collect (재개발닷컴 → regions/*.md ## 매물 절 교체 + data/listings 회차 스냅샷)
+      - name: Collect (재개발닷컴 → regions/listings/*.md 통째 쓰기 + data/listings 회차 스냅샷)
         run: python tools/collect_listings.py --summary /tmp/summary.md
 
       - name: Setup Node
@@ -48,8 +48,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # data/ 는 신규 파일이라 git diff 에 안 잡힌다 — 미추적까지 보는 git status 로 판정
-          if git diff --quiet -- regions && [ -z "$(git status --porcelain -- data)" ]; then
-            echo "매물 절·회차 스냅샷 모두 변화 없음 — 커밋하지 않는다"
+          # 매물은 regions/listings/ 아래이고 구역 파일은 이 워크플로가 건드리지 않는다
+          if [ -z "$(git status --porcelain -- regions data)" ]; then
+            echo "매물 파일·회차 스냅샷 모두 변화 없음 — 커밋하지 않는다"
             exit 0
           fi
           git config user.name "github-actions[bot]"

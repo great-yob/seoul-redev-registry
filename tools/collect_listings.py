@@ -1,4 +1,4 @@
-"""매물 자동수집 — 재개발닷컴 구역 매물 → 러프 매력도 점수 → regions/*.md `## 매물` 절 통째 교체.
+"""매물 자동수집 — 재개발닷컴 구역 매물 → 러프 매력도 점수 → `regions/listings/NN_slug.md` 통째 쓰기.
 
 GitHub Actions(.github/workflows/listings.yml)가 매주 금요일 04:00 KST에 실행한다. 로컬에서도 같은 명령으로 돈다.
     python tools/collect_listings.py [--only sangdo16,jangwi15] [--dry-run] [--out DIR] [--summary FILE]
@@ -9,7 +9,8 @@ GitHub Actions(.github/workflows/listings.yml)가 매주 금요일 04:00 KST에 
 - 호가·매물은 D등급. 점수는 구역 내 상대 순위(100점, 랭크 정규화)이며 어떤 계산에도 쓰지 않는다.
 - 예산 필터: 호가 PRICE_MIN 이상 PRICE_MAX 이하만 표에 남긴다. 예외는 하나 — 하한 미만이라도 점수가 예산 통과분 최고점 이상이면 싣는다.
   점수는 필터 전 구역 전체 기준이라 예외 판정이 가능하다. 제외 건수·구역 호가 범위는 노트에 남긴다 — 조용히 빼지 않는다.
-- `## 매물` 절은 행 단위 수정이 아니라 절 통째 교체. 다른 줄은 건드리지 않는다.
+- 매물은 구역 파일과 **다른 파일**이다 — `regions/listings/NN_slug.md` 하나가 통째로 `## 매물` 절이고 이 스크립트가 덮어쓴다.
+  구역 파일(`regions/NN_slug.md`)은 건드리지 않는다: 주 1회 자동 갱신이 구역 사실의 diff·갱신일을 덮지 않게 갈랐다(2026-09-22).
 - 원본(md)과 축적(jsonl)을 분리한다. md 는 예산 통과분만 보여 주는 판단용 뷰이고, `data/listings/YYYY-MM-DD.jsonl` 은
   필터 전 전 구역 전체를 남기는 기계 축적본이다(append-only, 회차당 1파일). 형식은 `data/README.md`.
   `--only` 이거나 수집 실패 구역이 있으면 스냅샷이 부분이므로 `.partial.jsonl` 로 떨어뜨린다 — gitignore 되어 이력에 섞이지 않는다.
@@ -342,30 +343,23 @@ def render_md(Z, rows, n_registered, basedate, bsrc, has_poly, today, st, pmin, 
     return '\n'.join(L) + '\n'
 
 
-def apply_section(path, block, dry_run):
-    """`## 매물` 절을 통째로 교체(없으면 끝에 추가). 줄바꿈 방식은 파일을 따른다. 이전 절의 '중복 제거 N건'을 돌려준다."""
-    raw = open(path, 'rb').read().decode('utf-8')
-    nl = '\r\n' if '\r\n' in raw else '\n'
-    lines = raw.split(nl)
-    idx = next((i for i, l in enumerate(lines) if l.startswith('## 매물')), None)
-    prev = None
-    if idx is not None:
-        end = next((i for i in range(idx + 1, len(lines)) if lines[i].startswith('## ')), len(lines))
-        old = nl.join(lines[idx:end])
+def write_listing_file(path, block, dry_run):
+    """매물 사이드카(`regions/listings/NN_slug.md`)를 통째로 쓴다. 파일 전체가 `## 매물` 절 하나라 교체가 아니라 덮어쓰기다.
+
+    구역 파일과 갈라 둔 이유는 갱신 주기다 — 구역 사실은 세션마다, 매물은 주 1회 자동이고 서로의 diff 를 덮는다.
+    줄바꿈은 기존 파일을 따르고(없으면 저장소 관례대로 CRLF), 이전 회차의 '중복 제거 N건'을 돌려준다.
+    """
+    prev, nl = None, '\r\n'
+    if os.path.exists(path):
+        old = open(path, 'rb').read().decode('utf-8')
+        nl = '\r\n' if '\r\n' in old else '\n'
         m = re.search(r'통과 (\d+)건|중복 제거 (\d+)건|등록 매물 (\d+)건', old)
         prev = int(next(g for g in m.groups() if g)) if m else None
-        before = lines[:idx]
-        while before and before[-1].strip() == '':
-            before.pop()
-        after = lines[end:]
-        new = nl.join(before) + nl + nl + block.replace('\n', nl) + (nl + nl.join(after) if any(x.strip() for x in after) else '')
-    else:
-        if not raw.endswith(nl):
-            raw += nl
-        new = raw + nl + block.replace('\n', nl)
+    new = block.replace('\n', nl)
     if not new.endswith(nl):
         new += nl
     if not dry_run:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         open(path, 'wb').write(new.encode('utf-8'))
     return prev
 
@@ -441,7 +435,7 @@ def main():
         if args.out:
             open(os.path.join(args.out, f'md_{Z["name"]}.md'), 'w', encoding='utf-8').write(block)
         history += history_records(Z, st, basedate, bsrc, has_poly, meta.get('stage'), len(asks), today, pmin, pmax)
-        prev = apply_section(os.path.join(ROOT, 'regions', Z['file'] + '.md'), block, args.dry_run)
+        prev = write_listing_file(os.path.join(ROOT, 'regions', 'listings', Z['file'] + '.md'), block, args.dry_run)
         top = ' · '.join(f'{r["addr"].split()[-1]}({r["score"]})' for r in rows[:3])
         results.append(dict(title=Z['title'], prev=prev, now=len(rows), dedup=st['n_dedup'], exc=st['n_exc'], registered=len(asks), stage=meta.get('stage'), top=top))
         print(f'{Z["title"]:12s} {prev if prev is not None else "-":>3} → {len(rows):3d}건 (등록 {len(asks)}, 중복 제거 {st["n_dedup"]}, 예산 내 {st["n_inb"]}, 저가 예외 {st["n_exc"]}, 단계 {meta.get("stage")}) 상위 {top}')
