@@ -135,8 +135,8 @@
       "last_run": "2026-09-22"
     },
     {
-      "id": "q31-cheonho338-aptprice-2026",
-      "q": "Q31",
+      "id": "q30-cheonho338-aptprice-2026",
+      "q": "Q30",
       "zone": "cheonho338",
       "dong": "1174010900",
       "kind": "aptprice",
@@ -182,8 +182,8 @@
       "last_run": "2026-09-22"
     },
     {
-      "id": "q31-cheonho338-aptprice-2025",
-      "q": "Q31",
+      "id": "q30-cheonho338-aptprice-2025",
+      "q": "Q30",
       "zone": "cheonho338",
       "dong": "1174010900",
       "kind": "aptprice",
