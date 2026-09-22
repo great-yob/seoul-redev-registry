@@ -77,7 +77,7 @@ const head = regText.match(/\*\*버전\*\* (v[\d.]+) \| \*\*갱신\*\* (\d{4}-\d
 if (!head) fail('10_REGION_REGISTRY.md 헤더(버전|갱신|구역 수)를 찾지 못했다');
 const registry = { version: head[1], updated: head[2], count: Number(head[3]) };
 
-const SUMMARY_COLS = ['#', '구역', '사업방식', '단계', '초기필요자금', '실거주매매가', '조합원분양가', '권리가액', '추가분담금', '최종투자금액', '비교시세(원안)', '비교시세(검증)', '안전마진(검증)', '토허(내국인 빌라)', '근거등급', '신뢰도'];
+const SUMMARY_COLS = ['#', '구역', '사업방식', '단계', '초기필요자금', '실거주매매가', '조합원분양가', '권리가액', '추가분담금', '최종투자금액', '비교시세(웹수집)', '비교시세(검증)', '안전마진(검증)', '토허(내국인 빌라)', '근거등급', '신뢰도'];
 const summary = tableAfter(regLines, /^## 요약표/, '요약표');
 if (!summary) fail('## 요약표 아래 표를 찾지 못했다');
 for (const c of SUMMARY_COLS) if (!summary.header.includes(c)) fail(`요약표에 '${c}' 열이 없다. 현재 열: ${summary.header.join(' | ')}`);
@@ -373,12 +373,14 @@ function compareInfo(r) {
   return name ? { name: cut(name, 22), year, n } : null;
 }
 // 예상 입주 불릿 — "2032~2035 (레인지 C) — 근거 …". 미산출·보류면 null
+// 라벨 안에 값까지 들어간 표기(`**예상 입주 2035~2040년**`)도 읽는다 — 값만 보면 근거 문장의 날짜에서 연도를 집는다
+// (구의동46이 선정일 2026-02-23 때문에 "입주 2026"으로 나갔다, 2026-09-22). 같은 이유로 `YYYY-MM` 은 연도로 세지 않는다.
 function moveIn(r) {
   const f = get(r, '예상 입주');
   if (!f) return null;
-  const s = strip(f.value);
+  const s = strip(f.label.replace(/^예상\s*입주/, '') + ' ' + f.value);
   if (/미산출|보류/.test(s)) return null;
-  const m = s.match(/(\d{4})(?:~(\d{4}))?/);
+  const m = s.match(/(\d{4})\s*~\s*(\d{4})/) || s.match(/(\d{4})(?!\s*[-.]\d{2})/);
   if (!m) return null;
   const g = (s.match(/\((?:레인지 )?([ABCD])/) || [])[1] || null;
   return { from: m[1], to: m[2] || null, grade: g, text: m[2] ? `${m[1]}~${m[2].slice(2)}` : m[1] };
@@ -617,7 +619,7 @@ function card(c) {
   const mg = p.marginNum !== null ? numSlot('안전마진', signed(p.marginNum), { sign: p.marginNum, grade: g, badge: badge(g, c.basis?.raw) })
     : /~/.test(p.margin) ? numSlot('안전마진', p.margin, { rng: true, grade: g, badge: badge(g, c.basis?.raw) })
       : numSlot('안전마진', '산출 불가', { na: true });
-  const sub = [c.district, c.method, c.households, c.nameNote, c.moveIn ? `입주 ${c.moveIn.text}${c.moveIn.grade ? ' ' + c.moveIn.grade : ''}` : null].filter(Boolean).map(esc).join(' · ');
+  const sub = [c.district, c.method, c.households, c.nameNote, c.moveIn ? `예상 입주 ${c.moveIn.text}${c.moveIn.grade ? ' ' + c.moveIn.grade : ''}` : null].filter(Boolean).map(esc).join(' · ');
   return `<a class="card ${c.style}" href="regions/${nn(c)}.html">
   <div class="nm">${esc(c.name)}</div>
   <div class="sub">${sub}</div>
@@ -790,7 +792,7 @@ function regionPage(c, i) {
   const r = byNo.get(c.no);
   const facts = [c.district, c.method, c.households ? `<b>${esc(c.households)}</b>` : null, c.area ? esc(c.area) : null,
   c.baseDate ? `기준일 <b>${esc(c.baseDate)}</b>${badge(c.baseDateGrade)}` : null, c.contractor ? `시공사 <b>${esc(c.contractor)}</b>` : null,
-  c.moveIn ? `입주 <b>${esc(c.moveIn.text)}</b>${badge(c.moveIn.grade)}` : null, c.nameNote ? esc(c.nameNote) : null]
+  c.moveIn ? `예상 입주 <b>${esc(c.moveIn.text)}</b>${badge(c.moveIn.grade)}` : null, c.nameNote ? esc(c.nameNote) : null]
     .filter(Boolean).map((x) => `<span>${x}</span>`).join('');
   // 제목 옆 링크 박스 — 지도는 facts 끝에, 임장 체크는 '매수 전 확인' 헤더에 숨어 있어 둘 다 스크롤해야 보였다.
   // 임장 수는 그 구역치 전부(공통 + 특이사항) — field.html 칩 배지와 같은 수여야 한다
