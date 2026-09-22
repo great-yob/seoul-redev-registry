@@ -1,6 +1,7 @@
 // site/build.mjs — 레지스트리 마크다운 → _site/ 정적 페이지
 //
-// 원본: 10_REGION_REGISTRY.md(요약표·OPEN QUESTIONS), regions/*.md(구역 상세·추정·매물),
+// 원본: 10_REGION_REGISTRY.md(요약표·OPEN QUESTIONS), regions/*.md(구역 상세·추정·임장),
+//       regions/listings/*.md(매물 — 자동수집이 통째로 쓰는 사이드카), 데이터는 같은 basename 으로 붙는다,
 //       00_PROJECT_BRIEF.md(§4 규제 — 초기 현금 산식의 입력), 20·DECISIONS(문서 뷰 원문)
 // 산출: _site/index.html(메인), _site/regions/NN.html(구역), _site/docs.html(문서 뷰), _site/data.json(검증용)
 // 의존성: Node 내장 모듈만. npm install 없음.
@@ -186,15 +187,18 @@ function parseRegion(file) {
   const m = lines[0].match(/^# (\d+)\. (.+)$/);
   if (!m) fail(`${file}: 첫 줄이 '# N. 이름' 형식이 아니다: ${lines[0]}`);
   const estIdx = lines.findIndex((l) => /^## 추정/.test(l));
-  const listIdx = lines.findIndex((l) => /^## 매물/.test(l));
   // `## 임장`(체크 항목)과 `## 임장 기록`(현장에서 올라온 회차)은 접두사가 같다 — 기록 절이 체크 표로 오인되면 안 된다
   const visitIdx = lines.findIndex((l) => /^## 임장(?! 기록)/.test(l));
   const logIdx = lines.findIndex((l) => /^## 임장 기록/.test(l));
   const secEnd = (from) => { const nx = lines.findIndex((l, k) => k > from && /^## /.test(l)); return nx < 0 ? lines.length : nx; };
-  const firstSec = [estIdx, visitIdx, listIdx, logIdx].filter((k) => k >= 0).sort((a, b) => a - b)[0];
+  const firstSec = [estIdx, visitIdx, logIdx].filter((k) => k >= 0).sort((a, b) => a - b)[0];
   const bodyLines = firstSec === undefined ? lines.slice(1) : lines.slice(1, firstSec);
   const estLines = estIdx < 0 ? [] : lines.slice(estIdx, secEnd(estIdx));
-  const listLines = listIdx < 0 ? [] : lines.slice(listIdx, secEnd(listIdx));
+  // `## 매물` 절은 구역 파일이 아니라 regions/listings/NN_slug.md 에 따로 있다 — 자동수집(주 1회)이 구역 사실과
+  // 갱신 주기가 달라서 갈랐다. 구역 파일에 남아 있으면 자동수집이 안 닿는 사본이라 경고한다.
+  const listFile = 'regions/listings/' + file.replace(/^regions\//, '');
+  const listLines = existsSync(path.join(ROOT, listFile)) ? read(listFile).split('\n') : [];
+  if (lines.some((l) => /^## 매물/.test(l))) warn(`${file}: 구역 파일 안의 '## 매물' 절은 읽지 않는다 — 원본은 ${listFile}`);
   const visitLines = visitIdx < 0 ? [] : lines.slice(visitIdx, secEnd(visitIdx));
   const logLines = logIdx < 0 ? [] : lines.slice(logIdx, secEnd(logIdx));
   const fields = {};
@@ -214,7 +218,7 @@ function parseRegion(file) {
     }
   }
   const est = estIdx < 0 ? null : { heading: lines[estIdx], table: tableAfter(estLines, /^## 추정/, `${file} 추정`), text: estLines.join('\n') };
-  const list = listIdx < 0 ? null : { heading: lines[listIdx], table: tableAfter(listLines, /^## 매물/, `${file} 매물`), note: listLines.slice(1).find((l) => l.trim() && !l.trim().startsWith('|')) || '', lines: listLines };
+  const list = listLines.length === 0 ? null : { heading: listLines[0], table: tableAfter(listLines, /^## 매물/, `${listFile} 매물`), note: listLines.slice(1).find((l) => l.trim() && !l.trim().startsWith('|')) || '', lines: listLines };
   const visit = visitIdx < 0 ? null : { heading: lines[visitIdx], table: tableAfter(visitLines, /^## 임장/, `${file} 임장`) };
   return { no: Number(m[1]), file, headingTitle: m[2].trim(), visit, fields, order, est, list, md: text, bullets: bodyLines.filter((l) => /^- /.test(l)).length, bodyMd: bodyLines.join('\n').trim(), estMd: estLines.join('\n').trim(), listMd: listLines.join('\n').trim(), logMd: logLines.join('\n').trim() };
 }

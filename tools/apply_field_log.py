@@ -243,9 +243,8 @@ def render_block(name, date, rows, common, region_items, issue, url, warns, cum,
 def apply_section(path, block, dry_run):
     """`## 임장 기록` 절에 회차 블록을 **최신이 위로** 끼운다. 절이 없으면 파일 끝에 만든다.
 
-    `## 매물` 절은 매주 자동 교체되지만 다음 `## ` 경계까지만 지운다(collect_listings.apply_section).
-    그래서 기록 절은 파일 **끝**에 둔다 — 매물 절 앞에 두면 교체 대상 범위에 들어가지 않지만,
-    끝에 두는 편이 절 순서가 고정돼 회차가 어디에 쌓이는지 매번 같다.
+    기록 절은 파일 **끝**에 둔다 — 절 순서가 고정돼 회차가 어디에 쌓이는지 매번 같다.
+    (매물은 2026-09-22부터 `regions/listings/NN_slug.md` 로 갈라져 이 파일과 부딪히지 않는다.)
     """
     raw = read(path)
     nl = '\r\n' if '\r\n' in raw else '\n'
