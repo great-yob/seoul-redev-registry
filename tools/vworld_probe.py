@@ -60,6 +60,9 @@ DROP = ('pnu', 'ldCode', 'ldCodeNm', 'mnnmSlno')
 
 DEFAULT_POLICY = dict(max_tasks_per_run=2, call_budget_per_run=80, sleep_sec=0.8,
                       block_backoff_days=1, max_consecutive_errors=3)
+# 재시도하면 풀리는 일시 오류. 막힘으로 세지 않는다 (2026-09-22 실측, call() docstring 참조).
+TRANSIENT = ('api:URL_TYPE', 'network:ConnectionError', 'network:ReadTimeout', 'http:500', 'http:502', 'http:503')
+TRANSIENT_RETRIES = 4
 
 
 class ProbeError(Exception):
@@ -188,14 +191,26 @@ def make_session(key):
     return s
 
 
-def call(session, kind, pnu, extra=None):
+def call(session, kind, pnu, extra=None, retries=TRANSIENT_RETRIES):
     """(rows, total, err) — err 가 있으면 막힌 것으로 본다. rows 가 빈 리스트면 '데이터 없음'이고 막힘이 아니다.
 
     빈 응답을 '해당 사항 없음'으로 읽으면 안 된다(DECISIONS #25 한계). 그래서 err 와 [] 를 갈라 놓는다.
-    extra 는 태스크의 `params`(예: 공시가격 계열의 `stdrYear`)를 그대로 실어 보낸다."""
+    extra 는 태스크의 `params`(예: 공시가격 계열의 `stdrYear`)를 그대로 실어 보낸다.
+
+    `URL_TYPE` 은 여기서 삼킨다 (2026-09-22 실측) — 같은 PNU 를 10번 부르면 2~3번이 이 코드로 떨어지고
+    나머지는 정상 응답한다. 주소가 틀린 것이 아니라 일시 오류다. 재시도 없이 그대로 올리면
+    max_consecutive_errors 를 잡아먹어 멀쩡한 태스크가 blocked 로 끝난다."""
     op, root = KINDS[kind]
     q = dict(pnu=pnu)
     q.update(extra or {})
+    for attempt in range(retries + 1):
+        rows, total, err = _call_once(session, op, root, q)
+        if err not in TRANSIENT or attempt == retries:
+            return rows, total, err
+        time.sleep(0.5 * (attempt + 1))
+
+
+def _call_once(session, op, root, q):
     try:
         r = session.get(BASE + op, params=q, timeout=25)
     except requests.RequestException as e:
