@@ -50,7 +50,7 @@ PRICE_MIN, PRICE_MAX = 5.0, 8.0   # 억. PRICE_MIN 이상 ~ PRICE_MAX 이하(양
 # 구역 설정. basedate 는 레지스트리 확정값(없으면 None → 재개발닷컴 상세의 right_basedate 를 채점에만 사용).
 # anchor 는 노트에 찍는 기준 앵커 문구(레지스트리 요약). 구역 파일의 사실이 바뀌면 여기도 맞춘다.
 ZONES = [
-    dict(name='dapsimni489', did='2153', title='답십리동 489', file='01_dapsimni489', basedate='2023-12-07', anchor='구역 내 실거래 없음(Q8) · 개별공시지가 중앙값 407만원/㎡(A)'),
+    dict(name='dapsimni489', did='2153', title='답십리동 489', file='01_dapsimni489', basedate='2023-12-07', anchor='구역 내 2026 중개거래 중앙 5.90억(단독다가구 지문 복원 3건, A) · 실거래/개별주택가격 배율 2.70(9건, A) · 개별공시지가 중앙 396만원/㎡(378필지, A)'),
     dict(name='jayang655', did='4641', title='자양1동 655', file='02_jayang655', basedate='2026-05-18', anchor='폴리곤 대조 구역 내 21건 중앙값 5.20억(2026, A) · 실거래/공시 배율 중앙 2.85(n=21, A)'),
     dict(name='cheonho338', did='1738', title='천호동 338', file='03_cheonho338', basedate='2024-05-23', anchor='폴리곤 대조 구역 내 52건 중앙값 5.00억(2026, A) · 실거래/공시 배율 중앙 2.93(n=52, A)'),
     dict(name='jangwi15', did='2327', title='장위15', file='04_jangwi15', basedate=None, anchor='233-42 실거래 10.00억(2026-06, 대지권 61.32㎡, A)'),
