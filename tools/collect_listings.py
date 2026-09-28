@@ -15,7 +15,9 @@ GitHub Actions(.github/workflows/listings.yml)가 매주 금요일 04:00 KST에 
   필터 전 전 구역 전체를 남기는 기계 축적본이다(append-only, 회차당 1파일). 형식은 `data/README.md`.
   `--only` 이거나 수집 실패 구역이 있으면 스냅샷이 부분이므로 `.partial.jsonl` 로 떨어뜨린다 — gitignore 되어 이력에 섞이지 않는다.
   `--dry-run` 은 md 만 건너뛴다(이력은 남긴다).
-- 조용히 틀리지 않는다: 목록 페이지가 200이 아니거나 전 구역 수집 합계(예산 필터 전) 0건이면 exit 1 → CI 실패, 커밋 없음.
+- 일시 오류(403·429·5xx·네트워크)는 요청마다 백오프 재시도하고, 그래도 목록이 실패한 구역은 전 구역 한 바퀴 뒤 쿨다운하고 한 번 더 돈다.
+- 조용히 틀리지 않는다: 재시도 후에도 목록 페이지가 200이 아니거나 전 구역 수집 합계(예산 필터 전) 0건이면 exit 1 → CI 실패, 커밋 없음.
+  재시도 후에도 빠진 상세 페이지 건수는 커밋 메시지 요약에 남긴다.
 - 의존성: requests 뿐. .env 불필요.
 """
 import argparse
@@ -65,9 +67,36 @@ ZONES = [
 session = requests.Session()
 session.headers.update({'User-Agent': UA, 'Accept-Language': 'ko-KR,ko;q=0.9'})
 
+# 재개발닷컴은 CloudFront 뒤 오리진이라 간헐적으로 500(오리진 30초 타임아웃)·403(WAF 일시 차단)을 낸다.
+# 2026-09-18·09-25 예약 실행이 한 구역 목록 페이지의 1회 오류로 통째 실패했고, 수 분 뒤 재실행은 통과했다 → 일시 오류는 기다렸다 다시 찌른다.
+TRANSIENT = {403, 408, 425, 429, 500, 502, 503, 504}
+LIST_BACKOFF = (15, 45, 90)     # 초. 목록 페이지 — 실패하면 구역 전체가 빠지므로 길게 기다린다
+DETAIL_BACKOFF = (5, 15)        # 초. 상세 페이지 — 건수가 많아 짧게
+ZONE_RETRY_WAIT = 180           # 초. 목록 재시도까지 실패한 구역을 전 구역 한 바퀴 뒤 다시 도는 쿨다운
+
 
 class CollectError(Exception):
     pass
+
+
+def get(url, backoff):
+    """일시 오류(TRANSIENT·네트워크)면 backoff 간격으로 재시도. 마지막 응답을 돌려주거나 마지막 예외를 올린다."""
+    for i in range(len(backoff) + 1):
+        try:
+            r = session.get(url, timeout=40)
+        except requests.RequestException as e:
+            if i == len(backoff):
+                raise
+            why = type(e).__name__
+        else:
+            if r.status_code not in TRANSIENT or i == len(backoff):
+                return r
+            why = f'HTTP {r.status_code}'
+            ra = r.headers.get('Retry-After', '')
+            if ra.isdigit():
+                time.sleep(min(int(ra), 120))
+        print(f'   재시도 {i + 1}/{len(backoff)} ({why}, {backoff[i]}s 대기): {url}', file=sys.stderr)
+        time.sleep(backoff[i])
 
 
 # ---------------------------------------------------------------- 재개발닷컴 파싱 (Next.js 플라이트 JSON)
@@ -123,7 +152,7 @@ def fetch_list(did):
     asks, meta = {}, {}
     for page in range(1, 8):
         url = f'https://jaegebal.com/develops/{did}/asks' + (f'?page={page}' if page > 1 else '')
-        r = session.get(url, timeout=40)
+        r = get(url, LIST_BACKOFF)
         if r.status_code != 200:
             raise CollectError(f'{url} → HTTP {r.status_code}')
         u = unesc(r.text)
@@ -144,9 +173,13 @@ def fetch_list(did):
 
 
 def fetch_detail(did, aid):
-    r = session.get(f'https://jaegebal.com/develops/{did}/asks/{aid}', timeout=40)
+    """상세 JSON. 재시도 후에도 실패하면 None — 빈 상세({})와 구분해 호출 쪽이 건수를 센다."""
+    try:
+        r = get(f'https://jaegebal.com/develops/{did}/asks/{aid}', DETAIL_BACKOFF)
+    except requests.RequestException:
+        return None
     if r.status_code != 200:
-        return {}
+        return None
     obj = enclosing(unesc(r.text), '"agent_name"')
     try:
         return json.loads(obj) if obj else {}
@@ -417,29 +450,46 @@ def main():
     today = dt.datetime.now(KST).strftime('%Y-%m-%d')
     if args.out:
         os.makedirs(args.out, exist_ok=True)
-    results, errors, history = [], [], []
-    for Z in ZONES:
-        if only and Z['name'] not in only:
-            continue
-        try:
-            asks, meta = fetch_list(Z['did'])
-        except (CollectError, requests.RequestException) as e:
-            errors.append(f'{Z["title"]}: {e}')
-            print(f'!! {Z["title"]}: {e}', file=sys.stderr)
-            continue
-        for aid, a in asks.items():
-            a['_detail'] = fetch_detail(Z['did'], aid)
-            time.sleep(0.5)
-        rows, basedate, bsrc, has_poly, st = score_zone(Z, asks, meta, pmin, pmax)
-        block = render_md(Z, rows, len(asks), basedate, bsrc, has_poly, today, st, pmin, pmax)
-        if args.out:
-            open(os.path.join(args.out, f'md_{Z["name"]}.md'), 'w', encoding='utf-8').write(block)
-        history += history_records(Z, st, basedate, bsrc, has_poly, meta.get('stage'), len(asks), today, pmin, pmax)
-        prev = write_listing_file(os.path.join(ROOT, 'regions', 'listings', Z['file'] + '.md'), block, args.dry_run)
-        top = ' · '.join(f'{r["addr"].split()[-1]}({r["score"]})' for r in rows[:3])
-        results.append(dict(title=Z['title'], prev=prev, now=len(rows), dedup=st['n_dedup'], exc=st['n_exc'], registered=len(asks), stage=meta.get('stage'), top=top))
-        print(f'{Z["title"]:12s} {prev if prev is not None else "-":>3} → {len(rows):3d}건 (등록 {len(asks)}, 중복 제거 {st["n_dedup"]}, 예산 내 {st["n_inb"]}, 저가 예외 {st["n_exc"]}, 단계 {meta.get("stage")}) 상위 {top}')
-        time.sleep(1)
+    done, errors, detail_fail = {}, {}, {}   # 구역 index → 결과 / 오류 / 상세 실패 건수
+    todo = [i for i, Z in enumerate(ZONES) if not only or Z['name'] in only]
+    for rnd in range(2):   # 2바퀴째는 1바퀴에서 목록 페이지가 실패한 구역만, 쿨다운 뒤 다시 돈다
+        if rnd:
+            todo = sorted(errors)
+            if not todo:
+                break
+            print(f'.. {len(todo)}개 구역 목록 수집 실패 — {ZONE_RETRY_WAIT}s 뒤 다시 시도', file=sys.stderr)
+            time.sleep(ZONE_RETRY_WAIT)
+        for i in todo:
+            Z = ZONES[i]
+            try:
+                asks, meta = fetch_list(Z['did'])
+            except (CollectError, requests.RequestException) as e:
+                errors[i] = f'{Z["title"]}: {e}'
+                print(f'!! {Z["title"]}: {e}', file=sys.stderr)
+                continue
+            errors.pop(i, None)
+            nfail = 0
+            for aid, a in asks.items():
+                d = fetch_detail(Z['did'], aid)
+                nfail += d is None
+                a['_detail'] = d or {}
+                time.sleep(0.5)
+            if nfail:
+                detail_fail[i] = nfail
+            rows, basedate, bsrc, has_poly, st = score_zone(Z, asks, meta, pmin, pmax)
+            block = render_md(Z, rows, len(asks), basedate, bsrc, has_poly, today, st, pmin, pmax)
+            if args.out:
+                open(os.path.join(args.out, f'md_{Z["name"]}.md'), 'w', encoding='utf-8').write(block)
+            hist = history_records(Z, st, basedate, bsrc, has_poly, meta.get('stage'), len(asks), today, pmin, pmax)
+            prev = write_listing_file(os.path.join(ROOT, 'regions', 'listings', Z['file'] + '.md'), block, args.dry_run)
+            top = ' · '.join(f'{r["addr"].split()[-1]}({r["score"]})' for r in rows[:3])
+            done[i] = dict(title=Z['title'], prev=prev, now=len(rows), dedup=st['n_dedup'], exc=st['n_exc'], registered=len(asks), stage=meta.get('stage'), top=top, hist=hist)
+            print(f'{Z["title"]:12s} {prev if prev is not None else "-":>3} → {len(rows):3d}건 (등록 {len(asks)}, 중복 제거 {st["n_dedup"]}, 예산 내 {st["n_inb"]}, 저가 예외 {st["n_exc"]}, 단계 {meta.get("stage")}) 상위 {top}'
+                  + (f' · 상세 실패 {nfail}건' if nfail else ''))
+            time.sleep(1)
+    results = [done[i] for i in sorted(done)]   # 재시도로 순서가 섞여도 요약·스냅샷은 ZONES 순서
+    history = [h for r in results for h in r['hist']]
+    errors = [errors[i] for i in sorted(errors)]
     total = sum(r['now'] for r in results)
     total_dedup = sum(r['dedup'] for r in results)
     total_exc = sum(r['exc'] for r in results)
@@ -449,6 +499,8 @@ def main():
     lines += [f'- 예산 필터: 호가 {pmin:.2f}억 이상 {pmax:.2f}억 이하 + 하한 미만 점수 예외 {total_exc}건 — 전 구역 {total_dedup}건 중 {total_dedup - total}건 제외',
               f'- 출처: 재개발닷컴 jaegebal.com/develops/{{id}}/asks ({today} 자동수집)', '- 등급: D (호가·매물, 계산 근거 아님)',
               '- 근거: 자동수집 tools/collect_listings.py · 채점 DECISIONS #19 · 예산 필터 DECISIONS #19 4·5차']
+    if detail_fail:   # 상세가 빠진 매물은 대지·연면적(→ 지분·단가) 없이 채점되고, 권리산정기준일 추정에서도 빠진다 — 조용히 넘기지 않는다
+        lines.append('- 상세 페이지 재시도 후 실패: ' + ' · '.join(f'{ZONES[i]["title"]} {n}건' for i, n in sorted(detail_fail.items())))
     if errors:
         lines += ['', '수집 실패:'] + [f'- {e}' for e in errors]
     summary = '\n'.join(lines) + '\n'
