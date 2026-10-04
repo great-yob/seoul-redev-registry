@@ -99,6 +99,11 @@ footer a { color: var(--accent); }
 .card.out { background: var(--surface-2); box-shadow: none; }
 .card .nm { font-size: 17px; font-weight: 700; line-height: 1.25; }
 .card .sub { font-size: 11.5px; color: var(--ink-3); margin-top: -4px; }
+/* 연 마진율 — 기간 보정 보조 지표(00 §3). 결론 숫자(안전마진)보다 한 단계 낮게 */
+.card .yr { font-size: 11.5px; color: var(--ink-3); margin-top: -2px; }
+.card .yr b { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.card .yr b.minus { color: var(--bad-ink); }
+.card .yr small { font-size: 10px; }
 .nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
 
 /* 구역 페이지 */
@@ -252,6 +257,12 @@ table.tbl th, table.tbl td { border: 1px solid var(--line); padding: 4px 6px; te
 table.tbl th { background: var(--surface-2); font-weight: 600; }
 table.tbl td:last-child a { color: var(--accent); margin-right: 6px; }
 .wide { overflow-x: auto; }
+/* 평형별 분담금 — 숫자 열은 오른쪽 정렬, 원칙 배정 평형(≈ 권리가액) 행만 굵게 */
+table.units td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+table.units td small { color: var(--ink-3); font-size: 10px; }
+table.units tr.near td:first-child { font-weight: 700; }
+table.units td.plus { color: var(--ok-ink); }
+table.units td.minus { color: var(--bad-ink); }
 ul.chain { margin: 8px 0 0; padding-left: 16px; font-size: 12.5px; color: var(--ink-2); }
 ul.chain li { margin: 3px 0; }
 .pn { display: flex; justify-content: space-between; gap: 12px; margin-top: 22px; font-size: 13px; }
