@@ -477,6 +477,63 @@ function cashOf(priceCell) {
   return { lo: a, hi: b, text: fmtRange([a.cash, b.cash]), loanText: fmtRange([a.loan, b.loan]), feeText: fmtRange([a.fee, b.fee]) };
 }
 
+// ---------------------------------------------------------------- 00 §3 → 기간 보정 · 평형 환산비 · 규칙 비교시세
+// 셋 다 페이지 보조 지표다 — 본표(요약표)는 84㎡ · 검증 비교시세 그대로 두고, 산식 입력이 바뀌면 여기서 따라간다.
+const built = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+const builtYear = (() => { const y = Number(built.slice(0, 4)); return y + (Date.parse(built) - Date.UTC(y, 0, 1)) / (365.25 * 864e5); })();
+const pct = (r) => (r < 0 ? '−' : '') + Math.round(Math.abs(r) * 100);
+const yrs = (y) => (y < 1 ? y.toFixed(1) : String(Math.round(y)));
+// 「기간 보정 — 연 마진율」: 안전마진 ÷ 초기 현금(실거주) ÷ 보유년수. 보유년수 = 예상 입주 레인지 양끝(연중 7월 1일 가정) − 빌드일.
+// 늦은 입주가 낮은 율이다. 단순 연환산(복리 아님), 분담금 납부 시점·이자·임차료 미반영 — 예상 입주가 레인지 C라 결과도 C
+const ANNUAL_ON = /^### 기간 보정/m.test(brief);
+if (!ANNUAL_ON) warn('00 §3 「기간 보정」 절이 없다 — 연 마진율을 내지 않는다');
+function annualOf(marginNum, cash, mv) {
+  if (!ANNUAL_ON || marginNum === null || !cash || !mv) return null;
+  const c = (cash.lo.cash + cash.hi.cash) / 2;
+  const y1 = Number(mv.from) + 0.5 - builtYear, y2 = Number(mv.to || mv.from) + 0.5 - builtYear;
+  if (y1 <= 0 || c <= 0) return null;
+  const lo = marginNum / c / y2, hi = marginNum / c / y1;
+  return { lo, hi, y1, y2, text: lo === hi || pct(lo) === pct(hi) ? `${pct(lo)}%` : `${pct(lo)}~${pct(hi)}%`, yearsText: yrs(y1) === yrs(y2) ? `${yrs(y1)}년` : `${yrs(y1)}~${yrs(y2)}년` };
+}
+// 「평형 환산비」: 59·74㎡ 조합원분양가 = 요약표 84㎡ 조합원분양가 × 환산비. 권리가액은 평형과 무관하다
+const unitRatioTable = tableAfter(brief.split('\n'), /^### 평형 환산비/, '00 §3 평형 환산비');
+const UNIT_RATIOS = unitRatioTable ? unitRatioTable.rows.map((x) => ({ band: (strip(x['평형']).match(/\d+/) || [])[0], ratio: num(x['환산비']) })).filter((x) => x.band && x.ratio) : [];
+if (!UNIT_RATIOS.length) warn('00 §3 평형 환산비 표를 읽지 못했다 — 평형별 분담금을 내지 않는다');
+// 「규칙 비교시세」: data/compare/YYYY-MM-DD.jsonl 최신 회차의 zone 행(부분 회차 .partial 은 읽지 않는다). tools/compare_price.py 가 쌓는다
+const compareSnap = (() => {
+  const dir = path.join(ROOT, 'data', 'compare');
+  const f = existsSync(dir) ? readdirSync(dir).filter((x) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(x)).sort().pop() : null;
+  if (!f) { warn('data/compare/ 에 회차가 없다 — 규칙 비교시세를 내지 않는다'); return { date: null, byFile: {} }; }
+  const byFile = {};
+  read(`data/compare/${f}`).split('\n').forEach((line, i) => {
+    if (!line.trim()) return;
+    let x;
+    try { x = JSON.parse(line); } catch { warn(`data/compare/${f}:${i + 1} 행이 JSON 이 아니다 — 건너뛴다`); return; }
+    if (x.t === 'zone' && x.file && x.band) (byFile[x.file] = byFile[x.file] || {})[x.band] = x;
+  });
+  return { date: f.slice(0, 10), byFile };
+})();
+// 평형별 분담금 행 — 84는 본표 값(검증 비교시세). 59·74의 비교시세는 규칙값 × (검증 84 ÷ 규칙 84) — 평형 간 상대가격만 규칙에서 빌리고
+// 수준은 검증값에 맞춘다. 규칙값을 그대로 쓰면 상도16(검증에 입지 보정)·수택2(검증이 최신 단지)에서 행끼리 기준선이 달라진다.
+// 원칙 배정 평형(권리가액에 가장 가까운 분양가)에 표시(Q22)
+function unitRowsOf(price, rule) {
+  const unit84 = num(price.unit), rights = num(price.rights), buy = rangeOf(price.buy);
+  if (unit84 === null || rights === null || !buy || !UNIT_RATIOS.length) return null;
+  const buyMid = (buy[0] + buy[1]) / 2;
+  const v84 = num(price.compare), r84 = rule?.['84']?.median ?? null;
+  const scale = v84 !== null && r84 ? v84 / r84 : null;
+  const rows = UNIT_RATIOS.map(({ band, ratio }) => {
+    const unit = unit84 * ratio, levy = unit - rights, invest = buyMid + levy;
+    const rr = rule?.[band] || null;
+    const cmp = band === '84' ? v84 : rr?.median != null && scale !== null ? rr.median * scale : null;
+    const cmpSrc = band === '84' ? '검증' : !rr ? '규칙 없음' : rr.median === null ? `표본 부족 ${rr.n}건` : scale === null ? '규칙 84 없음' : `규칙 ${rr.n}건 × ${scale.toFixed(2)}`;
+    return { band, ratio, unit, levy, invest, cmp, cmpSrc, margin: cmp === null ? null : cmp - invest };
+  });
+  const near = rows.reduce((a, b) => (Math.abs(b.unit - rights) < Math.abs(a.unit - rights) ? b : a));
+  near.near = true;
+  return rows;
+}
+
 // ---------------------------------------------------------------- 카드 데이터
 const byNo = new Map(regions.map((r) => [r.no, r]));
 const allCards = summary.rows.map((row) => {
@@ -530,12 +587,15 @@ const allCards = summary.rows.map((row) => {
     gapFund: initFund(r, est) || (num(row['초기필요자금']) !== null && toheo === '비대상' ? strip(row['초기필요자금']) : null),   // 갭 기준 참고 — 추정 절 실측 갭 우선, 없으면 요약표(토허 비대상일 때만 갭 의미)
     cash: cashOf(row['실거주매매가']),
   };
+  const mv = moveIn(r);
+  const slug = r.file.replace(/^regions\//, '').replace(/\.md$/, '');
+  const rule = compareSnap.byFile[slug] || null;
   return {
-    no, slug: r.file.replace(/^regions\//, '').replace(/\.md$/, ''), key: regionKey(r.file), name, nameNote, district: d ? d.name : null, seoul: d ? d.seoul : null,
+    no, slug, key: regionKey(r.file), name, nameNote, district: d ? d.name : null, seoul: d ? d.seoul : null,
     mapAddr: mapAddress(loc ? loc.value : '', d ? d.seoul : null),
     method, moa: /모아/.test(method), stage, stageShort: stageShort(stage, /미검증/.test(stage)), stageIdx, unverified: /미검증/.test(stage), style,
-    households: households(get(r, '세대수')), area, baseDate, baseDateGrade, stageDocGrade, contractor, moveIn: moveIn(r), compareInfo: compareInfo(r),
-    price, est, chain: estChain(r), toheo, trust: strip(row['신뢰도']), basis,
+    households: households(get(r, '세대수')), area, baseDate, baseDateGrade, stageDocGrade, contractor, moveIn: mv, compareInfo: compareInfo(r),
+    price, est, rule, annual: annualOf(marginNum, price.cash, mv), units: unitRowsOf(price, rule), chain: estChain(r), toheo, trust: strip(row['신뢰도']), basis,
     questions: qs.map((q) => q.id), openIds: qs.filter((q) => !q.resolved).map((q) => q.id), open: qs.filter((q) => !q.resolved).length,
     riskShort, riskLine, riskLead: risk ? risk.tail || null : null, riskFirst, riskRest,
     visit: parseVisit(r), visitLog: parseVisitLog(r), listings: parseListings(r), bullets: r.bullets, bytes: Buffer.byteLength(r.md, 'utf8'), updated,
@@ -629,6 +689,7 @@ function card(c) {
   <div class="sub">${sub}</div>
   <div><span class="stg${c.unverified ? ' warn' : ''}">${esc(c.stageShort)}</span></div>
   <div class="nums">${cash}${inv}${mg}</div>
+  ${c.annual ? `<div class="yr">연 마진율 <b class="${c.annual.hi < 0 ? 'minus' : ''}">${esc(c.annual.text)}</b> · 입주까지 ${esc(c.annual.yearsText)} <small>초기 현금 대비 · C</small></div>` : ''}
   <div class="tags">${tagsHtml(c)}</div>
 </a>`;
 }
@@ -646,8 +707,7 @@ const groupsHtml = GROUPS.map(([g, title, pred]) => {
   return `<section class="grp"><div class="grp-h"><b>${esc(title)} · ${cs.length}</b></div><div class="cards">${cs.map(card).join('')}</div></section>`;
 }).join('');
 
-const built = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
-const fill = (tpl, map) => tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => (k in map ? map[k] : (warn(`템플릿 자리표시자 미정의: ${k}`), '')));
+const fill =(tpl, map) => tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => (k in map ? map[k] : (warn(`템플릿 자리표시자 미정의: ${k}`), '')));
 
 // ---------------------------------------------------------------- 문서 뷰
 const REPO = 'great-yob/seoul-redev-registry';
@@ -742,11 +802,19 @@ function moneyHtml(c) {
   rows.push(grp('준공 후'));
   if (num(p.compare) !== null) rows.push(row(`비교시세${badge(p.compareGrade)}${ciText}`, fmtCell(p.compare)));
   else rows.push(row('비교시세', '미확보', { cls: 'na' }));
+  const r84 = c.rule?.['84'];
+  if (r84) {
+    const cv = num(p.compare), d = r84.median !== null && cv ? r84.median / cv - 1 : null;
+    const cond = `반경 ${r84.rule.radius_km}km · 준공 ${r84.rule.max_age}년 이내 · ${r84.months}개월 ${r84.n}건 · ${r84.date}`;
+    const dTxt = d === null ? '' : ` · 검증 대비 ${d >= 0 ? '+' : '−'}${Math.round(Math.abs(d) * 100)}%${Math.abs(d) > 0.1 ? ' — 단지 선택 재확인' : ''}`;
+    rows.push(row(`규칙 비교시세 <small>${esc(cond + dTxt)}</small>`, r84.median !== null ? fix2(r84.median) : '표본 부족', { ref: true }));
+  }
   const rng = c.est?.kind === 'scenario' ? ` <small>레인지 ${esc(c.est.range)}</small>` : '';
   const marginCls = p.marginNum !== null ? (gradeCls(g) || signCls(p.marginNum)) : /~/.test(p.margin) ? 'c' : 'na';
   if (p.marginNum !== null) rows.push(row(`= 안전마진${gb}${rng}`, signed(p.marginNum), { cls: 'sum ' + marginCls }));
   else if (/~/.test(p.margin)) rows.push(row(`= 안전마진${gb}${rng}`, esc(p.margin), { cls: 'sum c' }));
   else rows.push(row('안전마진', '산출 불가', { cls: 'na' }));
+  if (c.annual) rows.push(row(`연 마진율 <small>안전마진 ÷ 초기 현금 ÷ 입주까지 ${esc(c.annual.yearsText)} · 단순 연환산 C</small>`, esc(c.annual.text), { ref: true }));
   const chart = investNum !== null && num(p.compare) !== null && buyRg && buyRg[0] === buyRg[1] ? bar(buyRg[0], num(p.levy), num(p.compare)) + LEGEND : '';
   const cav = [investNum !== null ? '분양가 · 권리가액은 감정평가 전 추정치.' : '조합원분양가 · 권리가액 미확보 — 안전마진 산출 불가.', p.cash ? 'DSR 미반영 · 대출은 매매가 기준 근사.' : null, c.est?.kind === 'scenario' ? '점추정 인용 금지.' : null].filter(Boolean).join(' ');
   // 결과 타일 — 계산 내역을 읽지 않아도 세 숫자만으로 판단이 서게 한다. 값이 없으면 '—'
@@ -755,8 +823,19 @@ function moneyHtml(c) {
   const marginV = p.marginNum !== null ? signed(p.marginNum) : /~/.test(p.margin) ? strip(p.margin) : null;
   const kpi = tile('초기 현금', p.cash ? p.cash.text : null, p.cash ? (p.gapFund ? `대출 후 · 갭 ${esc(p.gapFund)}` : '대출 후 자기자금') : '실거주매매가 미확보')
     + tile('최종투자', investV, num(p.levy) !== null ? `분담금 ${fmtCell(p.levy)} 포함` : investV ? '레인지 · 분담금 미확정' : '분양가 · 권리가액 미확보')
-    + tile(`안전마진${marginV ? gb : ''}`, marginV, num(p.compare) !== null ? `비교시세 ${fmtCell(p.compare)}` : '비교시세 미확보', marginCls);
+    + tile(`안전마진${marginV ? gb : ''}`, marginV, (num(p.compare) !== null ? `비교시세 ${fmtCell(p.compare)}` : '비교시세 미확보') + (c.annual ? ` · 연 ${esc(c.annual.text)}` : ''), marginCls);
   return `<div class="kpi">${kpi}</div>${chart}<div class="rows">${rows.join('')}</div><div class="cav">${cav}</div>`;
+}
+
+// 평형별 분담금 — 접힘 안의 표. 84는 본표와 같은 값이고 59·74는 00 §3 환산비 × 규칙 비교시세다
+function unitsFold(c) {
+  const u = c.units;
+  if (!u) return '';
+  const cell = (v, sign) => (v === null || v === undefined ? '—' : sign ? signed(v) : fix2(v));
+  const trs = u.map((x) => `<tr${x.near ? ' class="near"' : ''}><td>${x.band}㎡${x.near ? ' <small>≈ 권리가액</small>' : ''}</td><td>${cell(x.unit)}</td><td>${cell(x.levy, true)}</td><td>${cell(x.invest)}</td><td>${cell(x.cmp)} <small>${esc(x.cmpSrc)}</small></td><td class="${signCls(x.margin)}">${cell(x.margin, true)}</td></tr>`).join('');
+  const ratios = UNIT_RATIOS.filter((x) => x.band !== '84').map((x) => `${x.band}㎡ ×${x.ratio.toFixed(Math.round(x.ratio * 1000) % 10 ? 3 : 2)}`).join(' · ');
+  const cav = `분양가 59·74㎡ = 84㎡ × 환산비(${ratios}, 장위15·수택2 고시 원문 2건 — 다른 구역에는 이식 C). 권리가액은 평형과 무관하다. 비교시세는 84㎡ 검증값, 59·74㎡ = 규칙값 × (검증 84 ÷ 규칙 84) — 평형 간 상대가격만 규칙(${compareSnap.date || '회차 없음'})에서 빌린다. ≈ 권리가액 = 조례상 원칙 배정에 가장 가까운 평형(Q22) — 84㎡는 경합 통과 조건부.`;
+  return `<details class="fold"><summary>평형별 분담금 · ${u.map((x) => x.band).join(' / ')}㎡</summary><div class="content"><div class="wide"><table class="tbl units"><tr><th>평형</th><th>분양가</th><th>분담금</th><th>최종투자</th><th>비교시세</th><th>안전마진</th></tr>${trs}</table></div><div class="cav">${esc(cav)}</div></div></details>`;
 }
 
 function kvTable(r, c) {
@@ -884,7 +963,7 @@ function regionPage(c, i) {
   return fill(readFileSync(path.join(TPL, 'region.html'), 'utf8'), {
     ...common, NAME: esc(c.name), SUB: esc([c.district, c.method, c.households].filter(Boolean).join(' · ')), NO: String(c.no), NO2: nn(c), SLUG: c.slug, UPDATED: c.updated, STYLE: c.style,
     FACTS: facts, TAGS: tagsHtml(c), STAGE: c.stageIdx === null ? `단계 미분류 · ${esc(c.stage)}` : '', STEPPER: stepper,
-    MONEY: moneyHtml(c), JUDGE: judge, LISTINGS: listingsHtml, CHECKS: checks,
+    MONEY: moneyHtml(c), FOLD_UNITS: unitsFold(c), JUDGE: judge, LISTINGS: listingsHtml, CHECKS: checks,
     TOPLINKS: topLinks, FOLD_FACTS: foldFacts, FOLD_QS: foldQs, FOLD_EST: foldEst, FOLD_LISTINGS: foldListings, LOG_LINE: logLine,
     PREV: prev ? `<a href="${nn(prev)}.html">‹ ${prev.no} ${esc(prev.name)}</a>` : '<span></span>',
     NEXT: next ? `<a href="${nn(next)}.html">${next.no} ${esc(next.name)} ›</a>` : '<span></span>',
@@ -924,7 +1003,7 @@ writeFileSync(path.join(OUT, 'field.html'), fill(readFileSync(path.join(TPL, 'fi
   DATA: JSON.stringify(fieldData).replace(/</g, '\\u003c'),
 }));
 cards.forEach((c, i) => writeFileSync(path.join(OUT, 'regions', nn(c) + '.html'), regionPage(c, i)));
-writeFileSync(path.join(OUT, 'data.json'), JSON.stringify({ registry, built, warnings, rules: { ltv: LTV, caps: CAPS, fee: !!feeText }, stages: STAGES.map((s) => s[0]), pills, cards, hidden, questions: shownQuestions, field: { version: fieldHead[1], updated: fieldHead[2], count: fieldCount, rules: fieldRules, groups: fieldGroups } }, null, 2));
+writeFileSync(path.join(OUT, 'data.json'), JSON.stringify({ registry, built, warnings, rules: { ltv: LTV, caps: CAPS, fee: !!feeText, annual: ANNUAL_ON, unitRatios: UNIT_RATIOS, compareDate: compareSnap.date }, stages: STAGES.map((s) => s[0]), pills, cards, hidden, questions: shownQuestions, field: { version: fieldHead[1], updated: fieldHead[2], count: fieldCount, rules: fieldRules, groups: fieldGroups } }, null, 2));
 if (existsSync(path.join(ROOT, 'site', 'static'))) for (const f of readdirSync(path.join(ROOT, 'site', 'static'))) writeFileSync(path.join(OUT, f), readFileSync(path.join(ROOT, 'site', 'static', f)));
 
 console.log(`ok  ${registry.version} · ${cards.length}개 구역 · 임장 공통 ${fieldCount}(+규칙 ${fieldRules.length}) + 구역별 ${cards.reduce((a, c) => a + c.visit.length, 0)} · 기록 ${cards.reduce((a, c) => a + c.visitLog.length, 0)}회${hidden.length ? ` · 숨김 ${hidden.map((h) => h.no + ' ' + h.name).join(' · ')}` : ''} · ${GROUPS.map(([, t, pred]) => `${t} ${cards.filter(pred).length}`).filter((s) => !/ 0$/.test(s)).join(' / ')} · 미해결 ${openUnique} · 경고 ${warnings.length}`);
