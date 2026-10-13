@@ -5196,8 +5196,8 @@
       "source": "vworld-cadastral(LP_PA_CBND_BUBUN) × 재개발닷컴 폴리곤 did 4916 — 필지 꼭짓점 평균 내포",
       "cadence": "once",
       "priority": 1,
-      "status": "pending",
-      "cursor": 0,
+      "status": "done",
+      "cursor": 147,
       "parcels": [
         "211-1",
         "211-2",
@@ -5347,7 +5347,18 @@
         "300-1",
         "301-1"
       ],
-      "goal": "석촌고분 토허·용도지역 필지단위 확인 — 서울 전역 아파트 한정·외국인 등 외에 붙는 지정이 있는지, 주거중심형 용도지역 요건(2종(7층 포함)·3종·준주거·준공업, 서울 조례 시행규칙 §4)에 맞는지"
+      "goal": "석촌고분 토허·용도지역 필지단위 확인 — 서울 전역 아파트 한정·외국인 등 외에 붙는 지정이 있는지, 주거중심형 용도지역 요건(2종(7층 포함)·3종·준주거·준공업, 서울 조례 시행규칙 §4)에 맞는지",
+      "last_run": "2026-10-13",
+      "runs": [
+        {
+          "date": "2026-10-13",
+          "calls": 147,
+          "ok": 147,
+          "empty": 0,
+          "trunc": null,
+          "blocked": null
+        }
+      ]
     },
     {
       "id": "q32-seokchon-gobun1-bldgage",
@@ -5358,8 +5369,8 @@
       "source": "vworld-cadastral(LP_PA_CBND_BUBUN) × 재개발닷컴 폴리곤 did 4916 — 필지 꼭짓점 평균 내포",
       "cadence": "once",
       "priority": 1,
-      "status": "pending",
-      "cursor": 0,
+      "status": "done",
+      "cursor": 147,
       "parcels": [
         "211-1",
         "211-2",
@@ -5509,7 +5520,18 @@
         "300-1",
         "301-1"
       ],
-      "goal": "노후도 실측 — 서울 조례 §5①2 주거중심형 요건 「준공 20년 이상 건축물 60% 이상」을 건축물대장 사용승인일로 센다. 거래 물건 건축년도 중앙이 2012라 요건 미달 가능성이 있다"
+      "goal": "노후도 실측 — 서울 조례 §5①2 주거중심형 요건 「준공 20년 이상 건축물 60% 이상」을 건축물대장 사용승인일로 센다. 거래 물건 건축년도 중앙이 2012라 요건 미달 가능성이 있다",
+      "last_run": "2026-10-13",
+      "runs": [
+        {
+          "date": "2026-10-13",
+          "calls": 147,
+          "ok": 106,
+          "empty": 41,
+          "trunc": null,
+          "blocked": null
+        }
+      ]
     },
     {
       "id": "q32-seokchon-gobun1-aptprice-2026",
@@ -5520,8 +5542,8 @@
       "source": "국토부 연립다세대 실거래(2025~2026) 지번 × 위 필지 목록",
       "cadence": "once",
       "priority": 2,
-      "status": "pending",
-      "cursor": 0,
+      "status": "done",
+      "cursor": 31,
       "parcels": [
         "211-1",
         "211-3",
@@ -5558,7 +5580,18 @@
       "params": {
         "stdrYear": "2026"
       },
-      "goal": "실거래/공시 배율 — 전용·층 매칭(00 §3). 민간 도심복합의 종전자산 평가 산식은 아직 없다(법 §26②1 감정평가 2인 산술평균만 확정)"
+      "goal": "실거래/공시 배율 — 전용·층 매칭(00 §3). 민간 도심복합의 종전자산 평가 산식은 아직 없다(법 §26②1 감정평가 2인 산술평균만 확정)",
+      "last_run": "2026-10-13",
+      "runs": [
+        {
+          "date": "2026-10-13",
+          "calls": 31,
+          "ok": 31,
+          "empty": 0,
+          "trunc": null,
+          "blocked": null
+        }
+      ]
     },
     {
       "id": "q32-seokchon-gobun1-aptprice-2025",
@@ -5569,8 +5602,8 @@
       "source": "국토부 연립다세대 실거래(2025~2026) 지번 × 위 필지 목록",
       "cadence": "once",
       "priority": 2,
-      "status": "pending",
-      "cursor": 0,
+      "status": "done",
+      "cursor": 31,
       "parcels": [
         "211-1",
         "211-3",
@@ -5607,7 +5640,18 @@
       "params": {
         "stdrYear": "2025"
       },
-      "goal": "배율 시계열 대조군 — 2026 단년 배율이 국면인지 가른다"
+      "goal": "배율 시계열 대조군 — 2026 단년 배율이 국면인지 가른다",
+      "last_run": "2026-10-13",
+      "runs": [
+        {
+          "date": "2026-10-13",
+          "calls": 31,
+          "ok": 31,
+          "empty": 0,
+          "trunc": null,
+          "blocked": null
+        }
+      ]
     },
     {
       "id": "q32-seokchon-gobun2-landuse",
@@ -5618,8 +5662,8 @@
       "source": "vworld-cadastral(LP_PA_CBND_BUBUN) × 재개발닷컴 폴리곤 did 4917 — 필지 꼭짓점 평균 내포",
       "cadence": "once",
       "priority": 1,
-      "status": "pending",
-      "cursor": 0,
+      "status": "done",
+      "cursor": 182,
       "parcels": [
         "228",
         "228-1",
@@ -5804,7 +5848,18 @@
         "304",
         "305"
       ],
-      "goal": "석촌고분 토허·용도지역 필지단위 확인 — 서울 전역 아파트 한정·외국인 등 외에 붙는 지정이 있는지, 주거중심형 용도지역 요건(2종(7층 포함)·3종·준주거·준공업, 서울 조례 시행규칙 §4)에 맞는지"
+      "goal": "석촌고분 토허·용도지역 필지단위 확인 — 서울 전역 아파트 한정·외국인 등 외에 붙는 지정이 있는지, 주거중심형 용도지역 요건(2종(7층 포함)·3종·준주거·준공업, 서울 조례 시행규칙 §4)에 맞는지",
+      "last_run": "2026-10-13",
+      "runs": [
+        {
+          "date": "2026-10-13",
+          "calls": 182,
+          "ok": 182,
+          "empty": 0,
+          "trunc": null,
+          "blocked": null
+        }
+      ]
     },
     {
       "id": "q32-seokchon-gobun2-bldgage",
@@ -5815,8 +5870,8 @@
       "source": "vworld-cadastral(LP_PA_CBND_BUBUN) × 재개발닷컴 폴리곤 did 4917 — 필지 꼭짓점 평균 내포",
       "cadence": "once",
       "priority": 1,
-      "status": "pending",
-      "cursor": 0,
+      "status": "done",
+      "cursor": 182,
       "parcels": [
         "228",
         "228-1",
@@ -6001,7 +6056,18 @@
         "304",
         "305"
       ],
-      "goal": "노후도 실측 — 서울 조례 §5①2 주거중심형 요건 「준공 20년 이상 건축물 60% 이상」을 건축물대장 사용승인일로 센다. 거래 물건 건축년도 중앙이 2012라 요건 미달 가능성이 있다"
+      "goal": "노후도 실측 — 서울 조례 §5①2 주거중심형 요건 「준공 20년 이상 건축물 60% 이상」을 건축물대장 사용승인일로 센다. 거래 물건 건축년도 중앙이 2012라 요건 미달 가능성이 있다",
+      "last_run": "2026-10-13",
+      "runs": [
+        {
+          "date": "2026-10-13",
+          "calls": 182,
+          "ok": 155,
+          "empty": 27,
+          "trunc": null,
+          "blocked": null
+        }
+      ]
     },
     {
       "id": "q32-seokchon-gobun2-aptprice-2026",
@@ -6012,8 +6078,8 @@
       "source": "국토부 연립다세대 실거래(2025~2026) 지번 × 위 필지 목록",
       "cadence": "once",
       "priority": 2,
-      "status": "pending",
-      "cursor": 0,
+      "status": "done",
+      "cursor": 33,
       "parcels": [
         "228-2",
         "228-5",
@@ -6052,7 +6118,18 @@
       "params": {
         "stdrYear": "2026"
       },
-      "goal": "실거래/공시 배율 — 전용·층 매칭(00 §3). 민간 도심복합의 종전자산 평가 산식은 아직 없다(법 §26②1 감정평가 2인 산술평균만 확정)"
+      "goal": "실거래/공시 배율 — 전용·층 매칭(00 §3). 민간 도심복합의 종전자산 평가 산식은 아직 없다(법 §26②1 감정평가 2인 산술평균만 확정)",
+      "last_run": "2026-10-13",
+      "runs": [
+        {
+          "date": "2026-10-13",
+          "calls": 33,
+          "ok": 33,
+          "empty": 0,
+          "trunc": null,
+          "blocked": null
+        }
+      ]
     },
     {
       "id": "q32-seokchon-gobun2-aptprice-2025",
@@ -6063,8 +6140,8 @@
       "source": "국토부 연립다세대 실거래(2025~2026) 지번 × 위 필지 목록",
       "cadence": "once",
       "priority": 2,
-      "status": "pending",
-      "cursor": 0,
+      "status": "done",
+      "cursor": 33,
       "parcels": [
         "228-2",
         "228-5",
@@ -6103,7 +6180,18 @@
       "params": {
         "stdrYear": "2025"
       },
-      "goal": "배율 시계열 대조군 — 2026 단년 배율이 국면인지 가른다"
+      "goal": "배율 시계열 대조군 — 2026 단년 배율이 국면인지 가른다",
+      "last_run": "2026-10-13",
+      "runs": [
+        {
+          "date": "2026-10-13",
+          "calls": 33,
+          "ok": 33,
+          "empty": 0,
+          "trunc": null,
+          "blocked": null
+        }
+      ]
     }
   ]
 }

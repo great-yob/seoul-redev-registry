@@ -69,6 +69,8 @@ ZONES = [
     dict(name='sutaek2', file='07_sutaek2', title='수택2', lng=127.144537, lat=37.593636, lawd=['41310']),
     dict(name='daejo212', file='08_daejo212', title='대조동212(가칭)', lng=126.919896, lat=37.615047, lawd=['11380']),
     dict(name='guui2donga', file='09_guui2dong46', title='구의2동A구역(구의동 46)', lng=127.093983, lat=37.550338, lawd=['11215']),
+    dict(name='seokchon-gobun1', file='10_seokchon-gobun1', title='석촌고분1구역(석촌동 232 일대)', lng=127.097932, lat=37.500536, lawd=['11710']),
+    dict(name='seokchon-gobun2', file='11_seokchon-gobun2', title='석촌고분2구역(석촌동 232 일대)', lng=127.099692, lat=37.500873, lawd=['11710']),
 ]
 
 EP = {   # 아파트매매는 상세(Dev) 엔드포인트 — 기본 엔드포인트는 이 키로 403(SERVICE_KEY_IS_NOT_REGISTERED)이다(2026-10-04)
