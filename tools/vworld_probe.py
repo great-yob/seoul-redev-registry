@@ -53,6 +53,7 @@ KINDS = {
     'aptprice': ('getApartHousingPriceAttr', 'apartHousingPrices'),  # 공동주택가격
     'landprice': ('getIndvdLandPriceAttr', 'indvdLandPrices'),   # 개별공시지가
     'houseprice': ('getIndvdHousingPriceAttr', 'indvdHousingPrices'),  # 개별주택가격
+    'bldgage':  ('getBuildingAge', 'buildingAges'),             # 건축물 연령(건축물대장 표제부) — 사용승인일·노후도 판정
 }
 BASE = 'https://api.vworld.kr/ned/data/'
 # 행에서 떼는 키 — 레코드 상위에 이미 있어 중복이다. 나머지는 응답 원본 그대로 남긴다.

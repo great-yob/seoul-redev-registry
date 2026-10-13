@@ -62,6 +62,8 @@ ZONES = [
     dict(name='sutaek2', did='4074', title='수택2', file='07_sutaek2', basedate='2023-07-14', anchor='폴리곤 대조 구역 내 149건 중앙값 4.35억(2026, A) · 고시 권리자 분양가 35평형 6.77억·보정률 1.65·비례율 108.13%(고시 제2023-94호, A)'),
     dict(name='daejo212', did='4577', title='대조동212(가칭)', file='08_daejo212', basedate=None, anchor='폴리곤 대조 구역 내 52건 중앙값 3.23억(2026, A) · 권리산정기준일 미지정'),
     dict(name='guui2donga', did='4141', title='구의2동A구역(구의동 46)', file='09_guui2dong46', basedate='2026-01-27', anchor='폴리곤 대조 구역 내 58건 중앙값 5.70억(2026, A) · 실거래/공시 배율 중앙 3.19(n=59, A) · 토허 대상'),
+    dict(name='seokchon-gobun1', did='4916', title='석촌고분1구역(석촌동 232 일대)', file='10_seokchon-gobun1', basedate=None, anchor='폴리곤 대조 구역 내 80건 중앙값 4.23억(2026, A) · 실거래/공시 배율 중앙 2.19(n=80, A) · 권리산정기준일 미지정 · 민간 도심복합'),
+    dict(name='seokchon-gobun2', did='4917', title='석촌고분2구역(석촌동 232 일대)', file='11_seokchon-gobun2', basedate=None, anchor='폴리곤 대조 구역 내 30건 중앙값 4.80억(2026, A) · 실거래/공시 배율 중앙 2.11(n=30, A) · 권리산정기준일 미지정 · 민간 도심복합'),
 ]
 
 session = requests.Session()
