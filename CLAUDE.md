@@ -17,7 +17,7 @@
 | `30_FIELD_CHECKLIST.md` | **한 구역을 임장할 때 쓰는 공통분** 26항목 + 맨 위에 박는 운영 규칙 5. 현장에서만 확인되는 것만. ID는 페이지 체크 상태의 저장 키라 문구가 바뀌어도 그대로 둔다 | 현장 다녀온 뒤 |
 | `DECISIONS.md` | 레지스트리 수치의 판단 근거 로그 | 판단 발생 시 |
 | `tools/collect_listings.py` | 매물 자동수집(재개발닷컴) → `regions/listings/*.md` 통째 쓰기 + `data/listings/` 스냅샷 기록. `.github/workflows/listings.yml`이 매주 금 04:00 KST 실행 | 자동 · 주 1회 |
-| `data/listings/*.jsonl` | 매물 회차 스냅샷. 필터 전 전체를 남기는 기계 축적본(append-only, 회차당 1파일). 형식은 `data/README.md` | 자동 · 주 1회 |
+| `data/listings/*.jsonl` | 매물 회차 스냅샷. 필터 전 전체를 남기는 기계 축적본(append-only, 회차당 1파일) + `details.json` 상세 캐시(새 매물만 상세를 받는다). 형식은 `data/README.md` | 자동 · 주 1회 |
 | `tools/compare_price.py` | 규칙 비교시세 — 국토부 실거래 → 구역별 신축 59·74·84㎡ 중앙값(규칙은 `00` §3). 매물 워크플로가 함께 돌린다. **md를 고치지 않는다** | 자동 · 주 1회 |
 | `data/compare/*.jsonl` | 규칙 비교시세 회차 스냅샷(append-only, 회차당 1파일) + `geocode.json` 캐시. 요약표 `비교시세(검증)`을 대체하지 않는 교차 검산. 형식은 `data/README.md` | 자동 · 주 1회 |
 | `tools/vworld_probe.py` | 브이월드 NED API 큐 프로버. 미해결 항목을 태스크로 쌓아 하루 예산만큼 찌르고, 막히면 커서를 남긴다. `--report`로 회차 집계·변화 감지. **md를 고치지 않는다** | 수동 · 세션마다 |
