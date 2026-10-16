@@ -15,9 +15,15 @@ GitHub Actions(.github/workflows/listings.yml)가 매주 금요일 04:00 KST에 
   필터 전 전 구역 전체를 남기는 기계 축적본이다(append-only, 회차당 1파일). 형식은 `data/README.md`.
   `--only` 이거나 수집 실패 구역이 있으면 스냅샷이 부분이므로 `.partial.jsonl` 로 떨어뜨린다 — gitignore 되어 이력에 섞이지 않는다.
   `--dry-run` 은 md 만 건너뛴다(이력은 남긴다).
-- 일시 오류(403·429·5xx·네트워크)는 요청마다 백오프 재시도하고, 그래도 목록이 실패한 구역은 전 구역 한 바퀴 뒤 쿨다운하고 한 번 더 돈다.
-- 조용히 틀리지 않는다: 재시도 후에도 목록 페이지가 200이 아니거나 전 구역 수집 합계(예산 필터 전) 0건이면 exit 1 → CI 실패, 커밋 없음.
-  재시도 후에도 빠진 상세 페이지 건수는 커밋 메시지 요약에 남긴다.
+- 요청은 전부 REQUEST_INTERVAL(4초) 간격으로 보낸다 — robots.txt `Crawl-delay: 1` 준수, 어느 10분 구간에도 150건 이하.
+  재개발닷컴 WAF 가 한 실행의 약 190번째 요청부터 러너를 막아 1·2차 시도가 같은 자리에서 실패했다(2026-10-16, HTTP 405).
+- 상세 페이지는 매물 id 별로 `data/listings/details.json` 에 캐시한다. 새 매물과 DETAIL_TTL_DAYS 지난 것만 다시 받는다 —
+  필지면적·연면적·좌표는 같은 매물이면 바뀌지 않는다. 캐시를 지우면 다음 실행이 전부 다시 받는다(약 25분).
+- 차단(403·405·429 또는 `x-amzn-waf-action` 헤더)이면 그 자리에서 멈추고 BLOCK_WAIT 쉰 뒤 같은 요청부터 잇는다(실행당 BLOCK_PAUSES 회).
+  그래도 막히면 더 보내지 않고 exit 1. 일시 오류(408·425·5xx·네트워크)는 요청마다 짧게 백오프 재시도하고,
+  그래도 실패한 구역은 전 구역 한 바퀴 뒤 쿨다운하고 한 번 더 돈다.
+- 조용히 틀리지 않는다: 재시도 후에도 목록 페이지가 200이 아니거나, 구역 상세 누락이 상한(10% 초과·3건 이상)이거나,
+  전 구역 수집 합계(예산 필터 전) 0건이면 exit 1 → CI 실패, 커밋 없음. 상한 아래의 상세 누락 건수는 커밋 메시지 요약에 남긴다.
 - 의존성: requests 뿐. .env 불필요.
 """
 import argparse
@@ -31,9 +37,9 @@ import time
 
 import requests
 
-for _s in (sys.stdout, sys.stderr):   # Windows 콘솔(cp949)에서도 한글·— 출력이 죽지 않게
+for _s in (sys.stdout, sys.stderr):   # Windows 콘솔(cp949)에서도 한글·— 출력이 죽지 않게. 줄 단위로 내보내야 CI 로그 시각이 실제 시각이다
     try:
-        _s.reconfigure(encoding='utf-8', errors='replace')
+        _s.reconfigure(encoding='utf-8', errors='replace', line_buffering=True)
     except Exception:
         pass
 
@@ -69,28 +75,73 @@ ZONES = [
 session = requests.Session()
 session.headers.update({'User-Agent': UA, 'Accept-Language': 'ko-KR,ko;q=0.9'})
 
-# 재개발닷컴은 CloudFront 뒤 오리진이라 간헐적으로 500(오리진 30초 타임아웃)·403(WAF 일시 차단)을 낸다.
-# 2026-09-18·09-25 예약 실행이 한 구역 목록 페이지의 1회 오류로 통째 실패했고, 수 분 뒤 재실행은 통과했다 → 일시 오류는 기다렸다 다시 찌른다.
-TRANSIENT = {403, 408, 425, 429, 500, 502, 503, 504}
+# 재개발닷컴은 CloudFront(AWS WAF) 뒤 Next.js 오리진이다. 한 IP 의 요청 수가 문턱을 넘으면 WAF 가 막는다 —
+# 10-02~10-13 은 약 250번째 요청에서 403·429(수십 초~수 분), 2026-10-16 은 약 190번째 요청부터 405(AWS WAF CAPTCHA 의 응답 코드)였고
+# 180초 쉬어도 풀리지 않아 1·2차 시도가 같은 자리에서 실패했다. 그래서 간격을 벌려 문턱 아래로 보내고, 막히면 멈춰서 오래 쉰다.
+# 오리진 일시 오류(500 = 오리진 30초 타임아웃 등)는 짧게 다시 찌른다(2026-09-18·09-25 예약 실행이 1회 오류로 통째 실패했다).
+REQUEST_INTERVAL = 4.0          # 초. 요청 시작 간 최소 간격 — 10분 150건(관측 문턱의 80%), robots.txt Crawl-delay 1
+BLOCK = {403, 405, 429}         # WAF 차단. 202 + x-amzn-waf-action(Challenge)도 차단으로 본다
+BLOCK_WAIT = 600                # 초. AWS WAF 속도 규칙의 가장 긴 집계 창(10분) 동안 아무것도 보내지 않는다
+BLOCK_PAUSES = 2                # 실행당 차단 쉼 횟수. 다 쓰고도 막히면 더 보내지 않고 끝낸다
+TRANSIENT = {408, 425, 500, 502, 503, 504}
 LIST_BACKOFF = (15, 45, 90)     # 초. 목록 페이지 — 실패하면 구역 전체가 빠지므로 길게 기다린다
 DETAIL_BACKOFF = (5, 15)        # 초. 상세 페이지 — 건수가 많아 짧게
-ZONE_RETRY_WAIT = 180           # 초. 목록 재시도까지 실패한 구역을 전 구역 한 바퀴 뒤 다시 도는 쿨다운
+ZONE_RETRY_WAIT = 180           # 초. 재시도까지 실패한 구역을 전 구역 한 바퀴 뒤 다시 도는 쿨다운
+DETAIL_TTL_DAYS = 28            # 상세 캐시 수명. 지나면 다시 받는다 — 권리산정기준일 지정 같은 드문 변경을 따라잡는다
+DETAIL_FAIL_RATIO, DETAIL_FAIL_MIN = 0.10, 3   # 구역 상세 누락이 10%를 넘고 3건 이상이면 그 구역은 실패 — 지분 두 축이 중간값으로 채점된 채 커밋되지 않게
 
 
 class CollectError(Exception):
     pass
 
 
+class Blocked(Exception):
+    """차단 쉼을 다 쓰고도 막혔다 — 실행 전체를 멈춘다. RequestException 이 아니라서 상세 쪽에서 삼켜지지 않는다."""
+
+
+_last_sent = float('-inf')     # 마지막 요청 시각(monotonic)
+_pauses = 0                    # 이번 실행에서 쓴 차단 쉼 횟수
+
+
+def send(url):
+    """REQUEST_INTERVAL 을 지켜 한 번 보낸다. 재시도까지 모든 요청이 여기를 지난다."""
+    global _last_sent
+    wait = _last_sent + REQUEST_INTERVAL - time.monotonic()
+    if wait > 0:
+        time.sleep(wait)
+    _last_sent = time.monotonic()
+    return session.get(url, timeout=40)
+
+
+def waf(r):
+    """차단 응답이면 로그용 진단 문자열, 아니면 None. 405 는 AWS WAF CAPTCHA, 202 + 헤더는 Challenge 다."""
+    action = r.headers.get('x-amzn-waf-action')
+    if r.status_code in BLOCK or action:
+        return f'HTTP {r.status_code} waf={action or "-"} cache={r.headers.get("x-cache", "-")} server={r.headers.get("server", "-")}'
+    return None
+
+
 def get(url, backoff):
-    """일시 오류(TRANSIENT·네트워크)면 backoff 간격으로 재시도. 마지막 응답을 돌려주거나 마지막 예외를 올린다."""
-    for i in range(len(backoff) + 1):
+    """차단이면 BLOCK_WAIT 쉬고 같은 요청부터 다시(실행당 BLOCK_PAUSES 회, 넘으면 Blocked).
+    일시 오류(TRANSIENT·네트워크)면 backoff 간격으로 재시도. 마지막 응답을 돌려주거나 마지막 예외를 올린다."""
+    global _pauses
+    i = 0
+    while True:
         try:
-            r = session.get(url, timeout=40)
+            r = send(url)
         except requests.RequestException as e:
             if i == len(backoff):
                 raise
             why = type(e).__name__
         else:
+            blk = waf(r)
+            if blk:
+                if _pauses >= BLOCK_PAUSES:
+                    raise Blocked(f'{url} → {blk} — 차단 쉼 {BLOCK_PAUSES}회 뒤에도 막힘')
+                _pauses += 1
+                print(f'   차단 {_pauses}/{BLOCK_PAUSES} ({blk}) — {BLOCK_WAIT}s 아무것도 보내지 않고 같은 요청부터 잇는다: {url}', file=sys.stderr)
+                time.sleep(BLOCK_WAIT)
+                continue
             if r.status_code not in TRANSIENT or i == len(backoff):
                 return r
             why = f'HTTP {r.status_code}'
@@ -99,6 +150,7 @@ def get(url, backoff):
                 time.sleep(min(int(ra), 120))
         print(f'   재시도 {i + 1}/{len(backoff)} ({why}, {backoff[i]}s 대기): {url}', file=sys.stderr)
         time.sleep(backoff[i])
+        i += 1
 
 
 # ---------------------------------------------------------------- 재개발닷컴 파싱 (Next.js 플라이트 JSON)
@@ -170,23 +222,72 @@ def fetch_list(did):
         asks.update(got)
         if not new or (meta.get('ask_count') and len(asks) >= meta['ask_count']):
             break
-        time.sleep(0.6)
     return asks, meta
 
 
 def fetch_detail(did, aid):
-    """상세 JSON. 재시도 후에도 실패하면 None — 빈 상세({})와 구분해 호출 쪽이 건수를 센다."""
+    """상세 JSON. 재시도 후에도 실패하면 None, 받았는데 상세 객체가 없으면 {} — 호출 쪽이 둘 다 누락으로 센다.
+
+    상세 객체 = `"id":<aid>` 를 품은 객체 가운데 address 가 dict 인 것(같은 id 의 목록 요약 객체는 address 가 문자열이다).
+    예전에는 "agent_name" 앵커로 잡았는데 2026-10-13~16 사이 사이트 개편으로 그 키가 사라져 전 매물이 빈 상세가 됐다 — 키 하나에 기대지 않는다.
+    """
     try:
         r = get(f'https://jaegebal.com/develops/{did}/asks/{aid}', DETAIL_BACKOFF)
     except requests.RequestException:
         return None
     if r.status_code != 200:
         return None
-    obj = enclosing(unesc(r.text), '"agent_name"')
-    try:
-        return json.loads(obj) if obj else {}
-    except Exception:
+    u = unesc(r.text)
+    for m in re.finditer(r'"id":%d[,}]' % int(aid), u):
+        try:
+            o = json.loads(enclosing(u, m.group(0)[:-1], m.start()))
+        except Exception:
+            continue
+        if isinstance(o.get('address'), dict):
+            return o
+    return {}
+
+
+# ---------------------------------------------------------------- 상세 캐시 (data/listings/details.json)
+def trim_detail(d):
+    """채점이 읽는 필드만 score_zone 이 읽는 모양 그대로 남긴다 — 필지면적·좌표·연면적·권리산정기준일."""
+    ad = d.get('address') or {}
+    return dict(address=dict(land_area=ad.get('land_area'), location=ad.get('location')),
+                buildings=[dict(tot_area=b.get('tot_area')) for b in (d.get('buildings') or [])],
+                right_basedate=d.get('right_basedate'))
+
+
+def load_cache(path):
+    if not os.path.exists(path):
         return {}
+    return json.load(io.open(path, encoding='utf-8'))
+
+
+def save_cache(path, cache):
+    """한 줄 = 매물 1건(id 순) — 회차 간 diff 가 새로 받은 매물·빠진 매물만 보이게 한다."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    rows = [f'{json.dumps(k)}: {json.dumps(cache[k], ensure_ascii=False, sort_keys=True)}' for k in sorted(cache, key=int)]
+    with io.open(path, 'w', encoding='utf-8', newline='\n') as f:
+        f.write('{\n' + ',\n'.join(rows) + '\n}\n')
+
+
+def detail_for(did, aid, cache, today):
+    """캐시가 DETAIL_TTL_DAYS 안이면 그대로, 아니면 받아서 캐시에 넣는다. (상세 또는 None, 출처) 를 돌려준다.
+
+    출처: cache 캐시 · fetch 새로 받음 · stale 다시 받기 실패라 지난 값 · fail 재시도 후 실패 · empty 받았으나 상세 객체 없음.
+    fail·empty 는 둘 다 누락이다. 빈 상세({})는 캐시하지 않는다 — 다음 회차에 다시 받는다.
+    """
+    key = str(aid)
+    hit = cache.get(key)
+    if hit and (dt.date.fromisoformat(today) - dt.date.fromisoformat(hit['fetched'])).days < DETAIL_TTL_DAYS:
+        return hit, 'cache'
+    d = fetch_detail(did, aid)
+    if d:
+        cache[key] = dict(trim_detail(d), fetched=today)
+        return cache[key], 'fetch'
+    if hit:   # 필지·연면적은 바뀌지 않는다 — 지난 값이 없는 것보다 낫다
+        return hit, 'stale'
+    return d, ('fail' if d is None else 'empty')
 
 
 # ---------------------------------------------------------------- 채점
@@ -452,30 +553,46 @@ def main():
     today = dt.datetime.now(KST).strftime('%Y-%m-%d')
     if args.out:
         os.makedirs(args.out, exist_ok=True)
-    done, errors, detail_fail = {}, {}, {}   # 구역 index → 결과 / 오류 / 상세 실패 건수
-    todo = [i for i, Z in enumerate(ZONES) if not only or Z['name'] in only]
-    for rnd in range(2):   # 2바퀴째는 1바퀴에서 목록 페이지가 실패한 구역만, 쿨다운 뒤 다시 돈다
+    cache_path = os.path.join(args.history_dir, 'details.json')
+    cache = load_cache(cache_path)
+    done, errors, detail_fail = {}, {}, {}   # 구역 index → 결과 / 오류 / 상세 누락 건수
+    src_n = dict(cache=0, fetch=0, stale=0, fail=0, empty=0)   # 상세 출처별 건수 — 끝난 구역만 센다
+    seen, blocked = set(), None   # 이번 회차 목록에 나온 매물 id · 차단으로 멈춘 사유
+    first = todo = [i for i, Z in enumerate(ZONES) if not only or Z['name'] in only]
+    for rnd in range(2):   # 2바퀴째는 1바퀴에서 실패한 구역만, 쿨다운 뒤 다시 돈다 — 상세는 캐시가 받아 둔 것을 다시 받지 않는다
         if rnd:
             todo = sorted(errors)
             if not todo:
                 break
-            print(f'.. {len(todo)}개 구역 목록 수집 실패 — {ZONE_RETRY_WAIT}s 뒤 다시 시도', file=sys.stderr)
+            print(f'.. {len(todo)}개 구역 수집 실패 — {ZONE_RETRY_WAIT}s 뒤 다시 시도', file=sys.stderr)
             time.sleep(ZONE_RETRY_WAIT)
         for i in todo:
             Z = ZONES[i]
             try:
                 asks, meta = fetch_list(Z['did'])
+                got = {aid: detail_for(Z['did'], aid, cache, today) for aid in asks}
+            except Blocked as e:
+                blocked = errors[i] = f'{Z["title"]}: {e}'
+                print(f'!! {blocked} — 더 보내지 않고 멈춘다', file=sys.stderr)
+                break
             except (CollectError, requests.RequestException) as e:
                 errors[i] = f'{Z["title"]}: {e}'
                 print(f'!! {Z["title"]}: {e}', file=sys.stderr)
                 continue
-            errors.pop(i, None)
-            nfail = 0
+            n_src = dict.fromkeys(src_n, 0)
             for aid, a in asks.items():
-                d = fetch_detail(Z['did'], aid)
-                nfail += d is None
+                d, src = got[aid]
+                n_src[src] += 1
                 a['_detail'] = d or {}
-                time.sleep(0.5)
+            nfail = n_src['fail'] + n_src['empty']   # 빈 상세도 누락이다 — 상세 구조가 바뀌면 전 매물이 여기로 온다(2026-10-16)
+            if nfail > DETAIL_FAIL_RATIO * len(asks) and nfail >= DETAIL_FAIL_MIN:
+                errors[i] = f'{Z["title"]}: 상세 {nfail}/{len(asks)}건 누락 — 상한({DETAIL_FAIL_RATIO:.0%} 초과·{DETAIL_FAIL_MIN}건 이상)'
+                print(f'!! {errors[i]}', file=sys.stderr)
+                continue
+            errors.pop(i, None)
+            seen.update(str(aid) for aid in asks)
+            for k, v in n_src.items():
+                src_n[k] += v
             if nfail:
                 detail_fail[i] = nfail
             rows, basedate, bsrc, has_poly, st = score_zone(Z, asks, meta, pmin, pmax)
@@ -487,8 +604,13 @@ def main():
             top = ' · '.join(f'{r["addr"].split()[-1]}({r["score"]})' for r in rows[:3])
             done[i] = dict(title=Z['title'], prev=prev, now=len(rows), dedup=st['n_dedup'], exc=st['n_exc'], registered=len(asks), stage=meta.get('stage'), top=top, hist=hist)
             print(f'{Z["title"]:12s} {prev if prev is not None else "-":>3} → {len(rows):3d}건 (등록 {len(asks)}, 중복 제거 {st["n_dedup"]}, 예산 내 {st["n_inb"]}, 저가 예외 {st["n_exc"]}, 단계 {meta.get("stage")}) 상위 {top}'
-                  + (f' · 상세 실패 {nfail}건' if nfail else ''))
-            time.sleep(1)
+                  + (f' · 상세 누락 {nfail}건' if nfail else '') + f' · 상세 새로 {n_src["fetch"]}·캐시 {n_src["cache"] + n_src["stale"]}')
+        if blocked:
+            break
+    if not only and not errors:   # 전 구역을 다 돈 회차만 — 목록에서 사라진 매물은 캐시에서도 뺀다
+        cache = {k: v for k, v in cache.items() if k in seen}
+    save_cache(cache_path, cache)
+    untried = [ZONES[i]['title'] for i in first if i not in done and i not in errors]   # 차단으로 멈춰 손대지 못한 구역
     results = [done[i] for i in sorted(done)]   # 재시도로 순서가 섞여도 요약·스냅샷은 ZONES 순서
     history = [h for r in results for h in r['hist']]
     errors = [errors[i] for i in sorted(errors)]
@@ -500,11 +622,17 @@ def main():
         lines.append(f'- {r["title"]}: {r["prev"] if r["prev"] is not None else "—"} → {r["now"]}건 (중복 제거 {r["dedup"]}건 중 {r["dedup"] - r["now"]}건 범위 밖, 저가 예외 {r["exc"]}건) · 상위 {r["top"] or "없음"}')
     lines += [f'- 예산 필터: 호가 {pmin:.2f}억 이상 {pmax:.2f}억 이하 + 하한 미만 점수 예외 {total_exc}건 — 전 구역 {total_dedup}건 중 {total_dedup - total}건 제외',
               f'- 출처: 재개발닷컴 jaegebal.com/develops/{{id}}/asks ({today} 자동수집)', '- 등급: D (호가·매물, 계산 근거 아님)',
-              '- 근거: 자동수집 tools/collect_listings.py · 채점 DECISIONS #19 · 예산 필터 DECISIONS #19 4·5차']
+              '- 근거: 자동수집 tools/collect_listings.py · 채점 DECISIONS #19 · 예산 필터 DECISIONS #19 4·5차',
+              f'- 상세: 새로 받음 {src_n["fetch"]}건 · 캐시 {src_n["cache"]}건' + (f' · 다시 받기 실패로 지난 값 {src_n["stale"]}건' if src_n['stale'] else '')
+              + f' (data/listings/details.json, {DETAIL_TTL_DAYS}일 지나면 다시 받음)']
+    if _pauses:
+        lines.append(f'- 재개발닷컴 차단 쉼 {_pauses}회(각 {BLOCK_WAIT}초) — 차단 응답 상태·헤더는 Actions 로그')
     if detail_fail:   # 상세가 빠진 매물은 대지·연면적(→ 지분·단가) 없이 채점되고, 권리산정기준일 추정에서도 빠진다 — 조용히 넘기지 않는다
-        lines.append('- 상세 페이지 재시도 후 실패: ' + ' · '.join(f'{ZONES[i]["title"]} {n}건' for i, n in sorted(detail_fail.items())))
+        lines.append('- 상세 누락(재시도 후 실패·빈 상세): ' + ' · '.join(f'{ZONES[i]["title"]} {n}건' for i, n in sorted(detail_fail.items())))
     if errors:
         lines += ['', '수집 실패:'] + [f'- {e}' for e in errors]
+    if untried:
+        lines += ['', '차단으로 멈춰 수집하지 않음: ' + ' · '.join(untried)]
     summary = '\n'.join(lines) + '\n'
     if args.summary:
         open(args.summary, 'w', encoding='utf-8').write(summary)
@@ -518,7 +646,8 @@ def main():
         print(f'history: {hp} — {len(history)}행 (zone {len(results)} + ask {len(history) - len(results)})'
               + ('  ** 부분 실행 — 커밋 대상 아님 **' if partial else ''))
     if errors:
-        print(f'FAIL  {len(errors)}개 구역 목록 페이지 수집 실패 — 커밋하지 않는다', file=sys.stderr)
+        print(f'FAIL  {len(errors)}개 구역 수집 실패' + (f' · {len(untried)}개 구역 미수집(차단으로 중단)' if untried else '')
+              + ' — 커밋하지 않는다', file=sys.stderr)
         return 1
     if results and total_dedup == 0:   # 필터 전 수집량으로 판정한다 — 예산 필터로 0건이 되는 것은 정상이다
         print('FAIL  전 구역 수집 0건 — 재개발닷컴 구조 변경 의심. 커밋하지 않는다', file=sys.stderr)
