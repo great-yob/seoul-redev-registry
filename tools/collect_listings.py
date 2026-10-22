@@ -1,6 +1,7 @@
 """매물 자동수집 — 재개발닷컴 구역 매물 → 러프 매력도 점수 → `regions/listings/NN_slug.md` 통째 쓰기.
 
-GitHub Actions(.github/workflows/listings.yml)가 매주 금요일 04:00 KST에 실행한다. 로컬에서도 같은 명령으로 돈다.
+PC 작업 스케줄러가 매주 목요일 09:00 KST에 tools/listings_local.py 로 실행한다 — 재개발닷컴이 GitHub 러너 IP 를 막아
+2026-10-23 러너에서 PC 로 옮겼다(DECISIONS #19 7차). 손으로 돌릴 때도 같은 명령이다.
     python tools/collect_listings.py [--only sangdo16,jangwi15] [--dry-run] [--out DIR] [--summary FILE]
                                      [--min-price 6.0] [--max-price 8.0]   # 하한 이상 ~ 상한 이하
                                      [--history-dir data/listings]
