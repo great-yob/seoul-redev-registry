@@ -22,27 +22,32 @@ jobs:
     # 재개발닷컴 WAF 차단이면 10분 쉼을 2회까지 더한다 → 수집 스텝 50분 + 비교시세 12분 + 빌드·커밋. 그 이상 걸리면 끊는다
     timeout-minutes: 70
     steps:
-      - name: Checkout main
+      # 예약 실행은 main, 수동 실행은 고른 브랜치를 받는다. 커밋·푸시는 main 실행에서만 한다(맨 아래 스텝)
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # playwright 는 재개발닷컴 WAF Challenge 토큰을 받는 헤드리스 Chromium 용이다(2026-10-23부터 첫 요청부터 Challenge)
       - name: Install deps
-        run: pip install requests
+        run: |
+          pip install requests playwright
+          python -m playwright install --with-deps --only-shell chromium
 
       - name: Collect (재개발닷컴 → regions/listings/*.md 통째 쓰기 + data/listings 회차 스냅샷·상세 캐시)
+        id: collect
         timeout-minutes: 50
         run: python tools/collect_listings.py --summary /tmp/summary.md
 
-      # 규칙 비교시세(00 §3) — 매물과 별개라 실패해도 매물 커밋을 막지 않는다. 키(secrets)가 없으면 exit 2 로 건너뛴다.
+      # 규칙 비교시세(00 §3) — 매물과 별개라 서로의 실패가 서로를 막지 않는다. 매물 수집이 실패해도 돌고 비교시세만 커밋한다
+      # (2026-10-23 매물 차단으로 이 스텝까지 건너뛰었다). 키(secrets)가 없으면 exit 2 로 건너뛴다.
       # 국토부 호출이 하나라도 실패하면 .partial.jsonl 로 떨어져(gitignore) 커밋되지 않는다
       # 국토부가 러너 IP 를 막으면 호출마다 백오프(약 3.4분)가 쌓여 잡 timeout 을 넘긴다(2026-10-13 실측) — 스텝에서 끊고 매물 커밋은 진행한다
       - name: Compare (국토부 실거래 → data/compare 규칙 비교시세 회차 스냅샷)
+        if: ${{ !cancelled() }}
         timeout-minutes: 12
         continue-on-error: true
         env:
@@ -58,27 +63,45 @@ jobs:
           else echo "::warning::규칙 비교시세 부분 회차(rc=$rc) — .partial 은 커밋되지 않는다"; fi
 
       - name: Setup Node
+        if: ${{ !cancelled() }}
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Build check (파서 규약이 깨지면 여기서 실패 — 커밋 안 함)
+        id: build
+        if: ${{ !cancelled() }}
         run: node site/build.mjs
 
+      # 매물 수집이 실패해도 비교시세 회차는 커밋한다 — 그때는 data/compare 만 올리고 매물 파일·스냅샷·상세 캐시는 올리지 않는다.
+      # 잡은 수집 스텝 실패로 빨간불이 그대로 남는다(실패 알림 유지)
       - name: Commit, push, deploy pages
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          COLLECT: ${{ steps.collect.outcome }}
         run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "브랜치 실행($GITHUB_REF_NAME) — 시험용이라 커밋하지 않는다"
+            exit 0
+          fi
+          if [ "$COLLECT" = success ]; then
+            paths="regions data"; msg=/tmp/summary.md
+          else
+            paths="data/compare"; msg=/tmp/msg.md
+            { echo "auto-listings: 규칙 비교시세만 기록 $(TZ=Asia/Seoul date +%F) — 매물 수집 실패(Actions 로그)"; echo
+              cat /tmp/compare.md 2>/dev/null; } > $msg
+          fi
           # data/ 는 신규 파일이라 git diff 에 안 잡힌다 — 미추적까지 보는 git status 로 판정
           # 매물은 regions/listings/ 아래이고 구역 파일은 이 워크플로가 건드리지 않는다
-          if [ -z "$(git status --porcelain -- regions data)" ]; then
-            echo "매물 파일·회차 스냅샷 모두 변화 없음 — 커밋하지 않는다"
+          if [ -z "$(git status --porcelain -- $paths)" ]; then
+            echo "$paths 변화 없음 — 커밋하지 않는다"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add regions data
-          git commit -F /tmp/summary.md
+          git add $paths
+          git commit -F $msg
           git push origin HEAD:main
           # GITHUB_TOKEN 으로 push 한 커밋은 다른 워크플로를 자동으로 깨우지 않는다 → Pages 배포를 직접 호출
           gh workflow run pages.yml --ref main

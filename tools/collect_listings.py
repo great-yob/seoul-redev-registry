@@ -19,12 +19,16 @@ GitHub Actions(.github/workflows/listings.yml)가 매주 금요일 04:00 KST에 
   재개발닷컴 WAF 가 한 실행의 약 190번째 요청부터 러너를 막아 1·2차 시도가 같은 자리에서 실패했다(2026-10-16, HTTP 405).
 - 상세 페이지는 매물 id 별로 `data/listings/details.json` 에 캐시한다. 새 매물과 DETAIL_TTL_DAYS 지난 것만 다시 받는다 —
   필지면적·연면적·좌표는 같은 매물이면 바뀌지 않는다. 캐시를 지우면 다음 실행이 전부 다시 받는다(약 25분).
-- 차단(403·405·429 또는 `x-amzn-waf-action` 헤더)이면 그 자리에서 멈추고 BLOCK_WAIT 쉰 뒤 같은 요청부터 잇는다(실행당 BLOCK_PAUSES 회).
+- 2026-10-23부터 재개발닷컴은 첫 요청부터 AWS WAF Challenge(202, 브라우저 JS 로 토큰 발급)를 건다 — 요청 수와 무관하다.
+  차단 응답이면 먼저 헤드리스 Chromium(Playwright)으로 그 페이지를 열어 `aws-waf-token` 쿠키를 받고, 쿠키와 브라우저 UA 를
+  requests 세션에 옮겨 같은 요청을 다시 보낸다(실행당 TOKEN_REFRESHES 회). 토큰은 약 4일 유효라 한 실행에 보통 1회다.
+  CAPTCHA(405)·IP 차단(헤더 없는 403)은 브라우저로도 토큰이 안 나온다 — 그때 아래 쉼으로 넘어간다.
+- 차단(403·405·429 또는 `x-amzn-waf-action` 헤더)이 토큰으로 안 풀리면 그 자리에서 멈추고 BLOCK_WAIT 쉰 뒤 같은 요청부터 잇는다(실행당 BLOCK_PAUSES 회).
   그래도 막히면 더 보내지 않고 exit 1. 일시 오류(408·425·5xx·네트워크)는 요청마다 짧게 백오프 재시도하고,
   그래도 실패한 구역은 전 구역 한 바퀴 뒤 쿨다운하고 한 번 더 돈다.
 - 조용히 틀리지 않는다: 재시도 후에도 목록 페이지가 200이 아니거나, 구역 상세 누락이 상한(10% 초과·3건 이상)이거나,
   전 구역 수집 합계(예산 필터 전) 0건이면 exit 1 → CI 실패, 커밋 없음. 상한 아래의 상세 누락 건수는 커밋 메시지 요약에 남긴다.
-- 의존성: requests 뿐. .env 불필요.
+- 의존성: requests + playwright(chromium). playwright 가 없으면 토큰 단계만 건너뛴다. .env 불필요.
 """
 import argparse
 import datetime as dt
@@ -83,6 +87,8 @@ REQUEST_INTERVAL = 4.0          # 초. 요청 시작 간 최소 간격 — 10분
 BLOCK = {403, 405, 429}         # WAF 차단. 202 + x-amzn-waf-action(Challenge)도 차단으로 본다
 BLOCK_WAIT = 600                # 초. AWS WAF 속도 규칙의 가장 긴 집계 창(10분) 동안 아무것도 보내지 않는다
 BLOCK_PAUSES = 2                # 실행당 차단 쉼 횟수. 다 쓰고도 막히면 더 보내지 않고 끝낸다
+TOKEN_REFRESHES = 3             # 실행당 브라우저 토큰 발급 횟수. 쉼보다 먼저 쓴다
+TOKEN_WAIT = 30                 # 초. 브라우저가 Challenge 를 풀어 토큰 쿠키가 생기기를 기다리는 상한(실측 1초)
 TRANSIENT = {408, 425, 500, 502, 503, 504}
 LIST_BACKOFF = (15, 45, 90)     # 초. 목록 페이지 — 실패하면 구역 전체가 빠지므로 길게 기다린다
 DETAIL_BACKOFF = (5, 15)        # 초. 상세 페이지 — 건수가 많아 짧게
@@ -101,6 +107,7 @@ class Blocked(Exception):
 
 _last_sent = float('-inf')     # 마지막 요청 시각(monotonic)
 _pauses = 0                    # 이번 실행에서 쓴 차단 쉼 횟수
+_tokens = 0                    # 이번 실행에서 브라우저로 토큰을 받으려 한 횟수
 
 
 def send(url):
@@ -121,11 +128,52 @@ def waf(r):
     return None
 
 
+def browser_token(url):
+    """헤드리스 Chromium 으로 url 을 열어 WAF Challenge 를 풀고 aws-waf-token 쿠키·브라우저 UA 를 session 에 옮긴다.
+    토큰을 받았으면 True. playwright 가 없거나 토큰이 안 나오면(CAPTCHA·IP 차단) False."""
+    global _last_sent
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print('   playwright 없음 — 브라우저 토큰 단계를 건너뛴다', file=sys.stderr)
+        return False
+    wait = _last_sent + REQUEST_INTERVAL - time.monotonic()
+    if wait > 0:
+        time.sleep(wait)
+    _last_sent = time.monotonic()
+    with sync_playwright() as p:
+        b = p.chromium.launch(headless=True)
+        try:
+            ctx = b.new_context(locale='ko-KR')
+            pg = ctx.new_page()
+            pg.goto(url, wait_until='domcontentloaded', timeout=60000)
+            for _ in range(TOKEN_WAIT):
+                cookies = ctx.cookies()
+                if any(c['name'] == 'aws-waf-token' for c in cookies):
+                    break
+                time.sleep(1)
+            else:
+                return False
+            ua = pg.evaluate('navigator.userAgent')
+        except Exception as e:
+            print(f'   브라우저 토큰 실패 ({type(e).__name__}: {e})', file=sys.stderr)
+            return False
+        finally:
+            b.close()
+    for c in cookies:
+        session.cookies.set(c['name'], c['value'], domain=c['domain'], path=c['path'])
+    session.headers['User-Agent'] = ua   # 토큰은 발급받은 브라우저의 UA 와 짝이다
+    _last_sent = time.monotonic()
+    return True
+
+
 def get(url, backoff):
-    """차단이면 BLOCK_WAIT 쉬고 같은 요청부터 다시(실행당 BLOCK_PAUSES 회, 넘으면 Blocked).
+    """차단이면 먼저 브라우저로 WAF 토큰을 받아 같은 요청을 다시(실행당 TOKEN_REFRESHES 회).
+    그래도 막히면 BLOCK_WAIT 쉬고 같은 요청부터 다시(실행당 BLOCK_PAUSES 회, 넘으면 Blocked).
     일시 오류(TRANSIENT·네트워크)면 backoff 간격으로 재시도. 마지막 응답을 돌려주거나 마지막 예외를 올린다."""
-    global _pauses
+    global _pauses, _tokens
     i = 0
+    fresh = False   # 이 요청을 위해 방금 토큰을 받았나 — 받자마자 또 막히면 토큰으로 안 풀리는 차단이다
     while True:
         try:
             r = send(url)
@@ -136,6 +184,14 @@ def get(url, backoff):
         else:
             blk = waf(r)
             if blk:
+                if not fresh and _tokens < TOKEN_REFRESHES:
+                    _tokens += 1
+                    print(f'   차단 ({blk}) — 브라우저로 WAF 토큰 받기 {_tokens}/{TOKEN_REFRESHES}: {url}', file=sys.stderr)
+                    if browser_token(url):
+                        fresh = True
+                        continue
+                    print('   토큰 안 나옴 — 쉼으로 넘어간다', file=sys.stderr)
+                fresh = False
                 if _pauses >= BLOCK_PAUSES:
                     raise Blocked(f'{url} → {blk} — 차단 쉼 {BLOCK_PAUSES}회 뒤에도 막힘')
                 _pauses += 1
@@ -625,6 +681,8 @@ def main():
               '- 근거: 자동수집 tools/collect_listings.py · 채점 DECISIONS #19 · 예산 필터 DECISIONS #19 4·5차',
               f'- 상세: 새로 받음 {src_n["fetch"]}건 · 캐시 {src_n["cache"]}건' + (f' · 다시 받기 실패로 지난 값 {src_n["stale"]}건' if src_n['stale'] else '')
               + f' (data/listings/details.json, {DETAIL_TTL_DAYS}일 지나면 다시 받음)']
+    if _tokens:
+        lines.append(f'- 재개발닷컴 WAF 토큰 브라우저 발급 시도 {_tokens}회 (헤드리스 Chromium)')
     if _pauses:
         lines.append(f'- 재개발닷컴 차단 쉼 {_pauses}회(각 {BLOCK_WAIT}초) — 차단 응답 상태·헤더는 Actions 로그')
     if detail_fail:   # 상세가 빠진 매물은 대지·연면적(→ 지분·단가) 없이 채점되고, 권리산정기준일 추정에서도 빠진다 — 조용히 넘기지 않는다
