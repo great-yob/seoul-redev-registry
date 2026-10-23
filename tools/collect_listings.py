@@ -16,10 +16,11 @@ PC 작업 스케줄러가 매주 목요일 09:00 KST에 tools/listings_local.py 
   필터 전 전 구역 전체를 남기는 기계 축적본이다(append-only, 회차당 1파일). 형식은 `data/README.md`.
   `--only` 이거나 수집 실패 구역이 있으면 스냅샷이 부분이므로 `.partial.jsonl` 로 떨어뜨린다 — gitignore 되어 이력에 섞이지 않는다.
   `--dry-run` 은 md 만 건너뛴다(이력은 남긴다).
-- 요청은 전부 REQUEST_INTERVAL(4초) 간격으로 보낸다 — robots.txt `Crawl-delay: 1` 준수, 어느 10분 구간에도 150건 이하.
+- 요청은 전부 REQUEST_INTERVAL(8초) 간격으로 보낸다 — robots.txt `Crawl-delay: 1` 준수. 429(속도 규칙)로 쉬면 쉰 뒤 간격을 2배로(상한 INTERVAL_MAX).
+  2026-10-23 PC 실행은 4초 간격에서 약 50건(3분 20초)마다 429 — 집계 창 4분 이상·문턱 약 50건으로 읽힌다. 10-16까지는 4초로 23분을 버텼다.
   재개발닷컴 WAF 가 한 실행의 약 190번째 요청부터 러너를 막아 1·2차 시도가 같은 자리에서 실패했다(2026-10-16, HTTP 405).
 - 상세 페이지는 매물 id 별로 `data/listings/details.json` 에 캐시한다. 새 매물과 DETAIL_TTL_DAYS 지난 것만 다시 받는다 —
-  필지면적·연면적·좌표는 같은 매물이면 바뀌지 않는다. 캐시를 지우면 다음 실행이 전부 다시 받는다(약 25분).
+  필지면적·연면적·좌표는 같은 매물이면 바뀌지 않는다. 캐시를 지우면 다음 실행이 전부 다시 받는다(8초 간격으로 약 50분).
 - 2026-10-23부터 재개발닷컴은 첫 요청부터 AWS WAF Challenge(202, 브라우저 JS 로 토큰 발급)를 건다 — 요청 수와 무관하다.
   Challenge 응답이면 먼저 헤드리스 Chromium(Playwright)으로 그 페이지를 열어 `aws-waf-token` 쿠키를 받고, 쿠키와 브라우저 UA 를
   requests 세션에 옮겨 같은 요청을 다시 보낸다(실행당 TOKEN_REFRESHES 회). 토큰은 약 4일 유효라 한 실행에 보통 1회다.
@@ -85,10 +86,11 @@ session.headers.update({'User-Agent': UA, 'Accept-Language': 'ko-KR,ko;q=0.9'})
 # 10-02~10-13 은 약 250번째 요청에서 403·429(수십 초~수 분), 2026-10-16 은 약 190번째 요청부터 405(AWS WAF CAPTCHA 의 응답 코드)였고
 # 180초 쉬어도 풀리지 않아 1·2차 시도가 같은 자리에서 실패했다. 그래서 간격을 벌려 문턱 아래로 보내고, 막히면 멈춰서 오래 쉰다.
 # 오리진 일시 오류(500 = 오리진 30초 타임아웃 등)는 짧게 다시 찌른다(2026-09-18·09-25 예약 실행이 1회 오류로 통째 실패했다).
-REQUEST_INTERVAL = 4.0          # 초. 요청 시작 간 최소 간격 — 10분 150건(관측 문턱의 80%), robots.txt Crawl-delay 1
+REQUEST_INTERVAL = 8.0          # 초. 요청 시작 간 최소 간격 — 5분 37건(관측 문턱 약 50건의 75%), robots.txt Crawl-delay 1
+INTERVAL_MAX = 32.0            # 초. 429 로 쉴 때마다 간격을 2배로 늘리는 상한
 BLOCK = {403, 405, 429}         # WAF 차단. 202 + x-amzn-waf-action(Challenge)도 차단으로 본다
 BLOCK_WAIT = 600                # 초. AWS WAF 속도 규칙의 가장 긴 집계 창(10분) 동안 아무것도 보내지 않는다
-BLOCK_PAUSES = 2                # 실행당 차단 쉼 횟수. 다 쓰고도 막히면 더 보내지 않고 끝낸다
+BLOCK_PAUSES = 3                # 실행당 차단 쉼 횟수. 다 쓰고도 막히면 더 보내지 않고 끝낸다
 TOKEN_REFRESHES = 3             # 실행당 브라우저 토큰 발급 횟수. 쉼보다 먼저 쓴다
 TOKEN_WAIT = 30                 # 초. 브라우저가 Challenge 를 풀어 토큰 쿠키가 생기기를 기다리는 상한(실측 1초)
 TRANSIENT = {408, 425, 500, 502, 503, 504}
@@ -110,12 +112,13 @@ class Blocked(Exception):
 _last_sent = float('-inf')     # 마지막 요청 시각(monotonic)
 _pauses = 0                    # 이번 실행에서 쓴 차단 쉼 횟수
 _tokens = 0                    # 이번 실행에서 브라우저로 토큰을 받으려 한 횟수
+_interval = REQUEST_INTERVAL   # 지금 요청 간격. 429 로 쉬면 늘어난다
 
 
 def send(url):
-    """REQUEST_INTERVAL 을 지켜 한 번 보낸다. 재시도까지 모든 요청이 여기를 지난다."""
+    """_interval 을 지켜 한 번 보낸다. 재시도까지 모든 요청이 여기를 지난다."""
     global _last_sent
-    wait = _last_sent + REQUEST_INTERVAL - time.monotonic()
+    wait = _last_sent + _interval - time.monotonic()
     if wait > 0:
         time.sleep(wait)
     _last_sent = time.monotonic()
@@ -139,7 +142,7 @@ def browser_token(url):
     except ImportError:
         print('   playwright 없음 — 브라우저 토큰 단계를 건너뛴다', file=sys.stderr)
         return False
-    wait = _last_sent + REQUEST_INTERVAL - time.monotonic()
+    wait = _last_sent + _interval - time.monotonic()
     if wait > 0:
         time.sleep(wait)
     _last_sent = time.monotonic()
@@ -182,7 +185,7 @@ def get(url, backoff):
     """차단이면 먼저 브라우저로 WAF 토큰을 받아 같은 요청을 다시(실행당 TOKEN_REFRESHES 회).
     그래도 막히면 BLOCK_WAIT 쉬고 같은 요청부터 다시(실행당 BLOCK_PAUSES 회, 넘으면 Blocked).
     일시 오류(TRANSIENT·네트워크)면 backoff 간격으로 재시도. 마지막 응답을 돌려주거나 마지막 예외를 올린다."""
-    global _pauses, _tokens
+    global _pauses, _tokens, _interval
     i = 0
     fresh = False   # 이 요청을 위해 방금 토큰을 받았나 — 받자마자 또 막히면 토큰으로 안 풀리는 차단이다
     while True:
@@ -209,6 +212,9 @@ def get(url, backoff):
                 _pauses += 1
                 print(f'   차단 {_pauses}/{BLOCK_PAUSES} ({blk}) — {BLOCK_WAIT}s 아무것도 보내지 않고 같은 요청부터 잇는다: {url}', file=sys.stderr)
                 time.sleep(BLOCK_WAIT)
+                if r.status_code == 429 and _interval < INTERVAL_MAX:
+                    _interval = min(_interval * 2, INTERVAL_MAX)
+                    print(f'   요청 간격 {_interval:.0f}s 로 늘린다', file=sys.stderr)
                 continue
             if r.status_code not in TRANSIENT or i == len(backoff):
                 return r
@@ -696,7 +702,7 @@ def main():
     if _tokens:
         lines.append(f'- 재개발닷컴 WAF 토큰 브라우저 발급 시도 {_tokens}회 (헤드리스 Chromium)')
     if _pauses:
-        lines.append(f'- 재개발닷컴 차단 쉼 {_pauses}회(각 {BLOCK_WAIT}초) — 차단 응답 상태·헤더는 Actions 로그')
+        lines.append(f'- 재개발닷컴 차단 쉼 {_pauses}회(각 {BLOCK_WAIT}초, 요청 간격 {REQUEST_INTERVAL:.0f} → {_interval:.0f}초) — 차단 응답 상태·헤더는 실행 로그')
     if detail_fail:   # 상세가 빠진 매물은 대지·연면적(→ 지분·단가) 없이 채점되고, 권리산정기준일 추정에서도 빠진다 — 조용히 넘기지 않는다
         lines.append('- 상세 누락(재시도 후 실패·빈 상세): ' + ' · '.join(f'{ZONES[i]["title"]} {n}건' for i, n in sorted(detail_fail.items())))
     if errors:
