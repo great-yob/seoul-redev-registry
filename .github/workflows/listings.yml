@@ -1,7 +1,11 @@
-name: Collect listings (weekly)
+name: Compare price (weekly)
 
 # 매주 금요일 04:00 KST = 목요일 19:00 UTC. GitHub 예약 실행은 부하에 따라 수 분~수십 분 늦을 수 있다.
-# 로컬 PC와 무관하게 GitHub 러너에서 돈다. 수동 실행: Actions 탭 → Run workflow, 또는 `gh workflow run listings.yml`.
+# 수동 실행: Actions 탭 → Run workflow, 또는 `gh workflow run listings.yml`.
+#
+# 국토부 규칙 비교시세(tools/compare_price.py)만 돈다. 매물 수집(tools/collect_listings.py)은 2026-10-23부터
+# PC 작업 스케줄러가 돌린다(tools/listings_local.py, 매주 목 09:00 KST) — 재개발닷컴이 러너(클라우드) IP 를 막아
+# 헤드리스 브라우저로도 헤더 없는 403 이었다(run 39869465784). 파일명은 이력·문서 참조 때문에 그대로 둔다.
 on:
   schedule:
     - cron: "0 19 * * 4"
@@ -16,16 +20,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  collect:
+  compare:
     runs-on: ubuntu-latest
-    # 수집은 평소 8분 안팎(요청 4초 간격, 새 매물만 상세). 상세 캐시가 빈 첫 실행은 약 25분이고,
-    # 재개발닷컴 WAF 차단이면 10분 쉼을 2회까지 더한다 → 수집 스텝 50분 + 비교시세 12분 + 빌드·커밋. 그 이상 걸리면 끊는다
-    timeout-minutes: 70
+    # 비교시세는 평소 7분 안팎. 국토부가 러너 IP 를 막으면 호출마다 백오프(약 3.4분)가 쌓인다(2026-10-13 실측) — 스텝에서 끊는다
+    timeout-minutes: 25
     steps:
-      - name: Checkout main
+      # 예약 실행은 main, 수동 실행은 고른 브랜치를 받는다. 커밋·푸시는 main 실행에서만 한다(맨 아래 스텝)
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -35,16 +37,10 @@ jobs:
       - name: Install deps
         run: pip install requests
 
-      - name: Collect (재개발닷컴 → regions/listings/*.md 통째 쓰기 + data/listings 회차 스냅샷·상세 캐시)
-        timeout-minutes: 50
-        run: python tools/collect_listings.py --summary /tmp/summary.md
-
-      # 규칙 비교시세(00 §3) — 매물과 별개라 실패해도 매물 커밋을 막지 않는다. 키(secrets)가 없으면 exit 2 로 건너뛴다.
-      # 국토부 호출이 하나라도 실패하면 .partial.jsonl 로 떨어져(gitignore) 커밋되지 않는다
-      # 국토부가 러너 IP 를 막으면 호출마다 백오프(약 3.4분)가 쌓여 잡 timeout 을 넘긴다(2026-10-13 실측) — 스텝에서 끊고 매물 커밋은 진행한다
+      # 규칙 비교시세(00 §3). 키(secrets)가 없으면 exit 2 로 건너뛴다.
+      # 국토부 호출이 하나라도 실패하면 .partial.jsonl 로 떨어지고(gitignore) 스텝이 실패한다 — 커밋하지 않는다
       - name: Compare (국토부 실거래 → data/compare 규칙 비교시세 회차 스냅샷)
         timeout-minutes: 12
-        continue-on-error: true
         env:
           MOLIT_API_KEY_DECODED: ${{ secrets.MOLIT_API_KEY_DECODED }}
           VWORLD_API_KEY: ${{ secrets.VWORLD_API_KEY }}
@@ -53,9 +49,8 @@ jobs:
           python tools/compare_price.py --summary /tmp/compare.md
           rc=$?
           set -e
-          if [ $rc -eq 0 ]; then { echo; cat /tmp/compare.md; } >> /tmp/summary.md
-          elif [ $rc -eq 2 ]; then echo "국토부 키(secrets.MOLIT_API_KEY_DECODED) 없음 — 규칙 비교시세 건너뜀"
-          else echo "::warning::규칙 비교시세 부분 회차(rc=$rc) — .partial 은 커밋되지 않는다"; fi
+          if [ $rc -eq 2 ]; then echo "국토부 키(secrets.MOLIT_API_KEY_DECODED) 없음 — 규칙 비교시세 건너뜀"; exit 0; fi
+          exit $rc
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -69,16 +64,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # data/ 는 신규 파일이라 git diff 에 안 잡힌다 — 미추적까지 보는 git status 로 판정
-          # 매물은 regions/listings/ 아래이고 구역 파일은 이 워크플로가 건드리지 않는다
-          if [ -z "$(git status --porcelain -- regions data)" ]; then
-            echo "매물 파일·회차 스냅샷 모두 변화 없음 — 커밋하지 않는다"
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "브랜치 실행($GITHUB_REF_NAME) — 시험용이라 커밋하지 않는다"
             exit 0
           fi
+          # data/ 는 신규 파일이라 git diff 에 안 잡힌다 — 미추적까지 보는 git status 로 판정
+          if [ -z "$(git status --porcelain -- data/compare)" ]; then
+            echo "규칙 비교시세 변화 없음 — 커밋하지 않는다"
+            exit 0
+          fi
+          { echo "auto-compare: 규칙 비교시세 회차 $(TZ=Asia/Seoul date +%F)"; echo; cat /tmp/compare.md; } > /tmp/msg.md
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add regions data
-          git commit -F /tmp/summary.md
+          git add data/compare
+          git commit -F /tmp/msg.md
           git push origin HEAD:main
-          # GITHUB_TOKEN 으로 push 한 커밋은 다른 워크플로를 자동으로 깨우지 않는다 → Pages 배포를 직접 호출
+          # GITHUB_TOKEN 으로 push 한 커밋은 다른 워크플로를 자동으로 깨우지 않고, pages.yml 경로에 data/compare 가 없다
+          # → Pages 배포를 직접 호출한다(페이지가 최신 회차를 굽는다)
           gh workflow run pages.yml --ref main
