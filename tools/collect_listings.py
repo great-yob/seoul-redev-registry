@@ -21,7 +21,7 @@ PC 작업 스케줄러가 매주 목요일 09:00 KST에 tools/listings_local.py 
 - 상세 페이지는 매물 id 별로 `data/listings/details.json` 에 캐시한다. 새 매물과 DETAIL_TTL_DAYS 지난 것만 다시 받는다 —
   필지면적·연면적·좌표는 같은 매물이면 바뀌지 않는다. 캐시를 지우면 다음 실행이 전부 다시 받는다(약 25분).
 - 2026-10-23부터 재개발닷컴은 첫 요청부터 AWS WAF Challenge(202, 브라우저 JS 로 토큰 발급)를 건다 — 요청 수와 무관하다.
-  차단 응답이면 먼저 헤드리스 Chromium(Playwright)으로 그 페이지를 열어 `aws-waf-token` 쿠키를 받고, 쿠키와 브라우저 UA 를
+  Challenge 응답이면 먼저 헤드리스 Chromium(Playwright)으로 그 페이지를 열어 `aws-waf-token` 쿠키를 받고, 쿠키와 브라우저 UA 를
   requests 세션에 옮겨 같은 요청을 다시 보낸다(실행당 TOKEN_REFRESHES 회). 토큰은 약 4일 유효라 한 실행에 보통 1회다.
   CAPTCHA(405)·IP 차단(헤더 없는 403)은 브라우저로도 토큰이 안 나온다 — 그때 아래 쉼으로 넘어간다.
 - 차단(403·405·429 또는 `x-amzn-waf-action` 헤더)이 토큰으로 안 풀리면 그 자리에서 멈추고 BLOCK_WAIT 쉰 뒤 같은 요청부터 잇는다(실행당 BLOCK_PAUSES 회).
@@ -39,6 +39,7 @@ import os
 import re
 import sys
 import time
+from urllib.parse import urlparse
 
 import requests
 
@@ -142,11 +143,21 @@ def browser_token(url):
     if wait > 0:
         time.sleep(wait)
     _last_sent = time.monotonic()
+    def only_documents(route):
+        # 재개발닷컴 쪽은 문서만 보낸다(Challenge 페이지 + 풀린 뒤 재로드 = 2건). Next.js 청크·이미지까지 받으면 수십 건이
+        # 속도 규칙에 얹혀 429 가 났다(2026-10-23 PC 첫 실행). 챌린지 스크립트·토큰 발급은 *.token.awswaf.com 이라 막지 않는다
+        host = urlparse(route.request.url).hostname or ''
+        if host.endswith('jaegebal.com') and route.request.resource_type != 'document':
+            return route.abort()
+        return route.continue_()
+
     with sync_playwright() as p:
         b = p.chromium.launch(headless=True)
         try:
             ctx = b.new_context(locale='ko-KR')
+            ctx.route('**/*', only_documents)
             pg = ctx.new_page()
+            ua = pg.evaluate('navigator.userAgent')   # 이동 전에 읽는다 — Challenge 가 풀리면 페이지가 재로드돼 evaluate 가 깨진다
             pg.goto(url, wait_until='domcontentloaded', timeout=60000)
             for _ in range(TOKEN_WAIT):
                 cookies = ctx.cookies()
@@ -155,7 +166,6 @@ def browser_token(url):
                 time.sleep(1)
             else:
                 return False
-            ua = pg.evaluate('navigator.userAgent')
         except Exception as e:
             print(f'   브라우저 토큰 실패 ({type(e).__name__}: {e})', file=sys.stderr)
             return False
@@ -185,7 +195,8 @@ def get(url, backoff):
         else:
             blk = waf(r)
             if blk:
-                if not fresh and _tokens < TOKEN_REFRESHES:
+                # 토큰은 Challenge(202 + challenge)에만 받는다. 429·헤더 없는 403(속도·IP 규칙)은 토큰으로 안 풀리고 발급 요청만 더 쌓는다
+                if r.headers.get('x-amzn-waf-action') == 'challenge' and not fresh and _tokens < TOKEN_REFRESHES:
                     _tokens += 1
                     print(f'   차단 ({blk}) — 브라우저로 WAF 토큰 받기 {_tokens}/{TOKEN_REFRESHES}: {url}', file=sys.stderr)
                     if browser_token(url):

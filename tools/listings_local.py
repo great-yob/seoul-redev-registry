@@ -43,15 +43,19 @@ def log(msg):
 
 
 def run(cmd, cwd=CLONE, check=True):
-    """출력은 로그 파일로. 실패면 CalledProcessError."""
-    log('$ ' + ' '.join(cmd))
-    r = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                       encoding='utf-8', errors='replace', creationflags=NO_WINDOW)
-    if r.stdout.strip():
-        log(r.stdout.rstrip())
-    if check and r.returncode:
-        raise subprocess.CalledProcessError(r.returncode, cmd)
-    return r
+    """출력은 줄마다 시각을 붙여 로그 파일로 흘린다(차단이 몇 분째에 왔는지 보이게). 실패면 CalledProcessError."""
+    log('$ ' + ' '.join(c if len(c) < 120 else c[:60] + '…' for c in cmd))
+    p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                         encoding='utf-8', errors='replace', creationflags=NO_WINDOW,
+                         env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
+    out = []
+    for line in p.stdout:
+        out.append(line)
+        log('  ' + line.rstrip())
+    p.wait()
+    if check and p.returncode:
+        raise subprocess.CalledProcessError(p.returncode, cmd)
+    return subprocess.CompletedProcess(cmd, p.returncode, ''.join(out))
 
 
 def console_python():
