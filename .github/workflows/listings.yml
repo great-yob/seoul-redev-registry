@@ -1,6 +1,7 @@
 name: Compare price (weekly)
 
-# 매주 금요일 04:00 KST = 목요일 19:00 UTC. GitHub 예약 실행은 부하에 따라 수 분~수십 분 늦을 수 있다.
+# 매주 금요일 04:23 KST = 목요일 19:23 UTC. GitHub 예약 실행은 정각에 몰려 늦는다 — 19:00 UTC 였을 때
+# 10-23 은 3시간 9분, 10-30 은 4시간 7분 늦게 시작했다. 그래서 정각을 피해 23분에 건다.
 # 수동 실행: Actions 탭 → Run workflow, 또는 `gh workflow run listings.yml`.
 #
 # 국토부 규칙 비교시세(tools/compare_price.py)만 돈다. 매물 수집(tools/collect_listings.py)은 2026-10-23부터
@@ -8,7 +9,7 @@ name: Compare price (weekly)
 # 헤드리스 브라우저로도 헤더 없는 403 이었다(run 39869465784). 파일명은 이력·문서 참조 때문에 그대로 둔다.
 on:
   schedule:
-    - cron: "0 19 * * 4"
+    - cron: "23 19 * * 4"
   workflow_dispatch:
 
 permissions:
