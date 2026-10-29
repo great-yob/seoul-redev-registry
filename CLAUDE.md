@@ -18,7 +18,7 @@
 | `DECISIONS.md` | 레지스트리 수치의 판단 근거 로그 | 판단 발생 시 |
 | `tools/collect_listings.py` | 매물 자동수집(재개발닷컴) → `regions/listings/*.md` 통째 쓰기 + `data/listings/` 스냅샷 기록. PC 작업 스케줄러가 `tools/listings_local.py`로 매주 목 09:00 KST 실행(재개발닷컴이 러너 IP를 막는다, `DECISIONS.md` #19 7차) | 자동 · 주 1회 |
 | `data/listings/*.jsonl` | 매물 회차 스냅샷. 필터 전 전체를 남기는 기계 축적본(append-only, 회차당 1파일) + `details.json` 상세 캐시(새 매물만 상세를 받는다). 형식은 `data/README.md` | 자동 · 주 1회 |
-| `tools/compare_price.py` | 규칙 비교시세 — 국토부 실거래 → 구역별 신축 59·74·84㎡ 중앙값(규칙은 `00` §3). `.github/workflows/listings.yml`이 매주 금 04:00 KST 돌린다. **md를 고치지 않는다** | 자동 · 주 1회 |
+| `tools/compare_price.py` | 규칙 비교시세 — 국토부 실거래 → 구역별 신축 59·74·84㎡ 중앙값(규칙은 `00` §3). `.github/workflows/listings.yml`이 매주 금 04:23 KST 돌린다(GitHub 예약 지연으로 실제는 수 시간 늦을 수 있다). **md를 고치지 않는다** | 자동 · 주 1회 |
 | `data/compare/*.jsonl` | 규칙 비교시세 회차 스냅샷(append-only, 회차당 1파일) + `geocode.json` 캐시. 요약표 `비교시세(검증)`을 대체하지 않는 교차 검산. 형식은 `data/README.md` | 자동 · 주 1회 |
 | `tools/vworld_probe.py` | 브이월드 NED API 큐 프로버. 미해결 항목을 태스크로 쌓아 하루 예산만큼 찌르고, 막히면 커서를 남긴다. `--report`로 회차 집계·변화 감지. **md를 고치지 않는다** | 수동 · 세션마다 |
 | `data/vworld/queue.json` | 프로버 태스크 큐. 진행 커서·주기·차단 상태를 들고 있어 여러 날에 걸쳐 이어받는다 | 프로버가 갱신 |
@@ -99,7 +99,7 @@ PC·모바일·클라우드 세션을 동시에 열 수 있다. 같은 파일을
 `auto-listings:` 접두사는 다르다. PC 작업 스케줄러가 매주 목요일 09:00(KST) `tools/listings_local.py`로 재개발닷컴을 수집해
 `regions/listings/*.md`·`data/listings/`만 덮어쓰고 main에 직접 커밋한 것이다(작성자는 사용자 git 계정, 전용 클론 `%LOCALAPPDATA%\seoul-redev-listings\repo`).
 정상이며 절차 누수가 아니다. 실패하면 `매물 수집 실패 YYYY-MM-DD (PC)` 이슈가 열린다.
-`auto-compare:` 접두사는 `.github/workflows/listings.yml`이 매주 금요일 04:00(KST) 국토부 규칙 비교시세를 `data/compare/`에 쌓고 커밋한 것이다(github-actions[bot]).
+`auto-compare:` 접두사는 `.github/workflows/listings.yml`이 매주 금요일 04:23(KST) 국토부 규칙 비교시세를 `data/compare/`에 쌓고 커밋한 것이다(github-actions[bot]).
 세션 시작 시 `git pull`로 받아 오면 된다.
 
 ### 커밋 보류 마커 (`.claude-hold`)
