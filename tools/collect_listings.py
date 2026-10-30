@@ -25,7 +25,10 @@ PC 작업 스케줄러가 매주 목요일 09:00 KST에 tools/listings_local.py 
   Challenge 응답이면 먼저 헤드리스 Chromium(Playwright)으로 그 페이지를 열어 `aws-waf-token` 쿠키를 받고, 쿠키와 브라우저 UA 를
   requests 세션에 옮겨 같은 요청을 다시 보낸다(실행당 TOKEN_REFRESHES 회). 토큰이 Challenge 를 면제하는 시간은 약 5분이라
   (2026-10-29 실측: 09:00·09:05·09:10·09:15 마다 다시 Challenge) 8초 간격 약 45분 실행이면 9~10회 받는다.
-  CAPTCHA(405)·IP 차단(헤더 없는 403)은 브라우저로도 토큰이 안 나온다 — 그때 아래 쉼으로 넘어간다.
+  IP 차단(헤더 없는 403)은 브라우저로도 토큰이 안 나온다 — 그때 아래 쉼으로 넘어간다.
+- CAPTCHA(405 또는 `x-amzn-waf-action: captcha`)는 쉬지 않고 그 자리에서 멈춘다(exit 1). 사람 확인을 요구하는 것이라 우회하지 않고,
+  쉼으로도 안 풀린다 — 2026-10-30 은 PC IP 자체에 CAPTCHA 가 걸려(사람 브라우저도 같음) 쉼 3회 30분 동안 요청만 쌓았다.
+  그래서 막혀 있는 동안의 주간 실행은 요청 몇 건으로 끝나는 확인이 되고, 풀린 주부터 그대로 수집한다.
 - 차단(403·405·429 또는 `x-amzn-waf-action` 헤더)이 토큰으로 안 풀리면 그 자리에서 멈추고 BLOCK_WAIT 쉰 뒤 같은 요청부터 잇는다(실행당 BLOCK_PAUSES 회).
   그래도 막히면 더 보내지 않고 exit 1. 일시 오류(408·425·5xx·네트워크)는 요청마다 짧게 백오프 재시도하고,
   그래도 실패한 구역은 전 구역 한 바퀴 뒤 쿨다운하고 한 번 더 돈다.
@@ -209,6 +212,8 @@ def get(url, backoff):
                         continue
                     print('   토큰 안 나옴 — 쉼으로 넘어간다', file=sys.stderr)
                 fresh = False
+                if r.status_code == 405 or r.headers.get('x-amzn-waf-action') == 'captcha':
+                    raise Blocked(f'{url} → {blk} — CAPTCHA(사람 확인 요구) — 쉬지 않고 멈춘다')
                 if _pauses >= BLOCK_PAUSES:
                     raise Blocked(f'{url} → {blk} — 차단 쉼 {BLOCK_PAUSES}회 뒤에도 막힘')
                 _pauses += 1
