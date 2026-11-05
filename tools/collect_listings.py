@@ -4,7 +4,7 @@ PC 작업 스케줄러가 매주 목요일 09:00 KST에 tools/listings_local.py 
 2026-10-23 러너에서 PC 로 옮겼다(DECISIONS #19 7차). 손으로 돌릴 때도 같은 명령이다.
     python tools/collect_listings.py [--only sangdo16,jangwi15] [--dry-run] [--out DIR] [--summary FILE]
                                      [--min-price 6.0] [--max-price 8.0]   # 하한 이상 ~ 상한 이하
-                                     [--history-dir data/listings]
+                                     [--history-dir data/listings] [--dump-dir DIR]   # 상세 누락 응답 원본 저장 위치
 
 원칙 (DECISIONS #19)
 - 호가·매물은 D등급. 점수는 구역 내 상대 순위(100점, 랭크 정규화)이며 어떤 계산에도 쓰지 않는다.
@@ -34,6 +34,12 @@ PC 작업 스케줄러가 매주 목요일 09:00 KST에 tools/listings_local.py 
   그래도 실패한 구역은 전 구역 한 바퀴 뒤 쿨다운하고 한 번 더 돈다.
 - 조용히 틀리지 않는다: 재시도 후에도 목록 페이지가 200이 아니거나, 구역 상세 누락이 상한(10% 초과·3건 이상)이거나,
   전 구역 수집 합계(예산 필터 전) 0건이면 exit 1 → CI 실패, 커밋 없음. 상한 아래의 상세 누락 건수는 커밋 메시지 요약에 남긴다.
+  상세 누락은 응답 이상(200 아님·네트워크)과 빈 상세(200 인데 상세 객체 없음)로 나눠 센다.
+- 새로 받는 상세가 DETAIL_STREAK_STOP 건 연달아 누락이면 실행 전체를 그 자리에서 멈춘다(2바퀴째도 돌지 않는다).
+  2026-11-05 는 목록은 다 받고 새 상세만 0건이었는데, 구역 상한으로 11구역을 두 바퀴 돌며 헛요청 약 200건을 쌓았다 —
+  같은 날 사람 브라우저가 저장한 같은 상세는 현행 파서로 정상 추출됐다(구조 개편 아님). 그날 저녁 진단 1건은 토큰 직후 CAPTCHA.
+- `--dump-dir` 이면 상세 누락의 첫 응답을 종류마다 1건씩 그 디렉터리에 남긴다(본문 .html + 상태·헤더 .json, 쿠키는 이름만).
+  로그에는 상태·길이·제목·플라이트 청크 수만 찍는다 — 로그만으로 구조 개편인지 자동화 제한인지 가른다. listings_local.py 가 LOG_DIR 아래로 넘긴다.
 - 의존성: requests + playwright(chromium). playwright 가 없으면 토큰 단계만 건너뛴다. .env 불필요.
 """
 import argparse
@@ -104,6 +110,8 @@ DETAIL_BACKOFF = (5, 15)        # 초. 상세 페이지 — 건수가 많아 짧
 ZONE_RETRY_WAIT = 180           # 초. 재시도까지 실패한 구역을 전 구역 한 바퀴 뒤 다시 도는 쿨다운
 DETAIL_TTL_DAYS = 28            # 상세 캐시 수명. 지나면 다시 받는다 — 권리산정기준일 지정 같은 드문 변경을 따라잡는다
 DETAIL_FAIL_RATIO, DETAIL_FAIL_MIN = 0.10, 3   # 구역 상세 누락이 10%를 넘고 3건 이상이면 그 구역은 실패 — 지분 두 축이 중간값으로 채점된 채 커밋되지 않게
+DETAIL_STREAK_STOP = 5          # 새로 받는 상세가 이만큼 연달아 누락이면 실행 전체를 멈춘다 — 매물별 우연이 아니라 상세 경로 전체가 막힌 것이다
+DETAIL_URL = 'https://jaegebal.com/develops/{}/asks/{}'
 
 
 class CollectError(Exception):
@@ -111,13 +119,16 @@ class CollectError(Exception):
 
 
 class Blocked(Exception):
-    """차단 쉼을 다 쓰고도 막혔다 — 실행 전체를 멈춘다. RequestException 이 아니라서 상세 쪽에서 삼켜지지 않는다."""
+    """더 보내면 안 된다 — 차단 쉼 소진·CAPTCHA·상세 연속 누락. 실행 전체를 멈춘다. RequestException 이 아니라서 상세 쪽에서 삼켜지지 않는다."""
 
 
 _last_sent = float('-inf')     # 마지막 요청 시각(monotonic)
 _pauses = 0                    # 이번 실행에서 쓴 차단 쉼 횟수
 _tokens = 0                    # 이번 실행에서 브라우저로 토큰을 받으려 한 횟수
 _interval = REQUEST_INTERVAL   # 지금 요청 간격. 429 로 쉬면 늘어난다
+_streak = []                   # 새로 받는 상세의 연속 누락 종류(fail·empty). 하나라도 받으면 비운다
+_dump_dir = None               # --dump-dir. 상세 누락 응답 원본을 남길 곳
+_dumped = set()                # 이미 남긴 누락 종류 — 종류마다 첫 1건만
 
 
 def send(url):
@@ -307,17 +318,18 @@ def fetch_list(did):
 
 
 def fetch_detail(did, aid):
-    """상세 JSON. 재시도 후에도 실패하면 None, 받았는데 상세 객체가 없으면 {} — 호출 쪽이 둘 다 누락으로 센다.
+    """(상세, 응답). 상세는 재시도 후에도 실패하면 None, 받았는데 상세 객체가 없으면 {} — 호출 쪽이 둘 다 누락으로 센다.
+    응답은 requests 응답, 네트워크 예외면 그 설명 문자열 — 누락 원본 저장(dump_detail)용.
 
     상세 객체 = `"id":<aid>` 를 품은 객체 가운데 address 가 dict 인 것(같은 id 의 목록 요약 객체는 address 가 문자열이다).
     예전에는 "agent_name" 앵커로 잡았는데 2026-10-13~16 사이 사이트 개편으로 그 키가 사라져 전 매물이 빈 상세가 됐다 — 키 하나에 기대지 않는다.
     """
     try:
-        r = get(f'https://jaegebal.com/develops/{did}/asks/{aid}', DETAIL_BACKOFF)
-    except requests.RequestException:
-        return None
+        r = get(DETAIL_URL.format(did, aid), DETAIL_BACKOFF)
+    except requests.RequestException as e:
+        return None, f'{type(e).__name__}: {e}'
     if r.status_code != 200:
-        return None
+        return None, r
     u = unesc(r.text)
     for m in re.finditer(r'"id":%d[,}]' % int(aid), u):
         try:
@@ -325,8 +337,43 @@ def fetch_detail(did, aid):
         except Exception:
             continue
         if isinstance(o.get('address'), dict):
-            return o
-    return {}
+            return o, r
+    return {}, r
+
+
+def dump_detail(kind, url, aid, r):
+    """상세 누락의 첫 응답을 종류(fail·empty)마다 1건 _dump_dir 에 남기고 한 줄 진단을 로그에 찍는다.
+    본문은 .html, 상태·헤더·표지는 .json. 보낸 쿠키·받은 set-cookie 는 이름만 남긴다(WAF 토큰 값은 남기지 않는다).
+    로그 줄은 실패 이슈에 실리므로(공개 저장소) 상태·길이·제목·개수만 찍는다."""
+    if kind in _dumped:
+        return
+    _dumped.add(kind)
+    if isinstance(r, str):
+        meta, body = dict(url=url, error=r), ''
+        line = r
+    else:
+        body = r.text
+        t = re.search(r'<title>(.*?)</title>', body, re.S)
+        title = re.sub(r'\s+', ' ', t.group(1)).strip()[:80] if t else None
+        hits = len(re.findall(r'"id":%d[,}]' % int(aid), unesc(body)))
+        meta = dict(url=url, final_url=r.url, status=r.status_code,
+                    history=[[h.status_code, h.headers.get('location')] for h in r.history],
+                    headers={k: v for k, v in r.headers.items() if k.lower() != 'set-cookie'},
+                    set_cookie_names=sorted(r.cookies.keys()), sent_ua=r.request.headers.get('User-Agent'),
+                    sent_cookie_names=sorted(session.cookies.keys()), length=len(body), title=title,
+                    next_f=body.count('self.__next_f.push'), id_hits=hits)
+        line = (f'HTTP {r.status_code}' + (f' (리다이렉트 {len(r.history)}회 → {r.url})' if r.history else '')
+                + f' · {len(body)}자 · 제목 {title!r} · 플라이트 청크 {meta["next_f"]} · "id":{aid} {hits}곳')
+    where = ''
+    if _dump_dir:
+        os.makedirs(_dump_dir, exist_ok=True)
+        base = os.path.join(_dump_dir, f'detail-{kind}-{aid}')
+        with io.open(base + '.json', 'w', encoding='utf-8') as f:
+            json.dump(meta, f, ensure_ascii=False, indent=1)
+        with io.open(base + '.html', 'w', encoding='utf-8') as f:
+            f.write(body)
+        where = f' → {base}.html'
+    print(f'   상세 누락 첫 응답({"응답 이상" if kind == "fail" else "빈 상세"}): {line}{where}', file=sys.stderr)
 
 
 # ---------------------------------------------------------------- 상세 캐시 (data/listings/details.json)
@@ -357,18 +404,26 @@ def detail_for(did, aid, cache, today):
 
     출처: cache 캐시 · fetch 새로 받음 · stale 다시 받기 실패라 지난 값 · fail 재시도 후 실패 · empty 받았으나 상세 객체 없음.
     fail·empty 는 둘 다 누락이다. 빈 상세({})는 캐시하지 않는다 — 다음 회차에 다시 받는다.
+    새로 받기가 DETAIL_STREAK_STOP 건 연달아 실패하면(stale 포함 — 받기 실패는 같다) Blocked 로 실행을 멈춘다.
     """
     key = str(aid)
     hit = cache.get(key)
     if hit and (dt.date.fromisoformat(today) - dt.date.fromisoformat(hit['fetched'])).days < DETAIL_TTL_DAYS:
         return hit, 'cache'
-    d = fetch_detail(did, aid)
+    d, r = fetch_detail(did, aid)
     if d:
+        _streak.clear()
         cache[key] = dict(trim_detail(d), fetched=today)
         return cache[key], 'fetch'
+    kind = 'fail' if d is None else 'empty'
+    dump_detail(kind, DETAIL_URL.format(did, aid), aid, r)
+    _streak.append(kind)
+    if len(_streak) >= DETAIL_STREAK_STOP:
+        raise Blocked(f'새 상세 {len(_streak)}건 연속 누락(응답 이상 {_streak.count("fail")} · 빈 상세 {_streak.count("empty")})'
+                      ' — 상세 경로 전체가 막혔다(구조 개편 또는 자동화 제한). 첫 응답은 위 「상세 누락 첫 응답」 줄')
     if hit:   # 필지·연면적은 바뀌지 않는다 — 지난 값이 없는 것보다 낫다
         return hit, 'stale'
-    return d, ('fail' if d is None else 'empty')
+    return d, kind
 
 
 # ---------------------------------------------------------------- 채점
@@ -628,7 +683,10 @@ def main():
     ap.add_argument('--history-dir', default=os.path.join(ROOT, 'data', 'listings'), help='회차 스냅샷 jsonl 디렉터리. 기본 data/listings')
     ap.add_argument('--min-price', type=float, default=PRICE_MIN, help=f'예산 필터 하한(억, 이상). 기본 {PRICE_MIN}')
     ap.add_argument('--max-price', type=float, default=PRICE_MAX, help=f'예산 필터 상한(억, 이하). 기본 {PRICE_MAX}')
+    ap.add_argument('--dump-dir', help='상세 누락의 첫 응답(종류마다 1건)을 이 디렉터리에 저장. 없으면 로그 한 줄만')
     args = ap.parse_args()
+    global _dump_dir
+    _dump_dir = args.dump_dir
     pmin, pmax = args.min_price, args.max_price
     only = set(args.only.split(',')) if args.only else None
     today = dt.datetime.now(KST).strftime('%Y-%m-%d')
@@ -667,7 +725,8 @@ def main():
                 a['_detail'] = d or {}
             nfail = n_src['fail'] + n_src['empty']   # 빈 상세도 누락이다 — 상세 구조가 바뀌면 전 매물이 여기로 온다(2026-10-16)
             if nfail > DETAIL_FAIL_RATIO * len(asks) and nfail >= DETAIL_FAIL_MIN:
-                errors[i] = f'{Z["title"]}: 상세 {nfail}/{len(asks)}건 누락 — 상한({DETAIL_FAIL_RATIO:.0%} 초과·{DETAIL_FAIL_MIN}건 이상)'
+                errors[i] = (f'{Z["title"]}: 상세 {nfail}/{len(asks)}건 누락(응답 이상 {n_src["fail"]} · 빈 상세 {n_src["empty"]})'
+                             f' — 상한({DETAIL_FAIL_RATIO:.0%} 초과·{DETAIL_FAIL_MIN}건 이상)')
                 print(f'!! {errors[i]}', file=sys.stderr)
                 continue
             errors.pop(i, None)
@@ -711,7 +770,8 @@ def main():
     if _pauses:
         lines.append(f'- 재개발닷컴 차단 쉼 {_pauses}회(각 {BLOCK_WAIT}초, 요청 간격 {REQUEST_INTERVAL:.0f} → {_interval:.0f}초) — 차단 응답 상태·헤더는 실행 로그')
     if detail_fail:   # 상세가 빠진 매물은 대지·연면적(→ 지분·단가) 없이 채점되고, 권리산정기준일 추정에서도 빠진다 — 조용히 넘기지 않는다
-        lines.append('- 상세 누락(재시도 후 실패·빈 상세): ' + ' · '.join(f'{ZONES[i]["title"]} {n}건' for i, n in sorted(detail_fail.items())))
+        lines.append(f'- 상세 누락(응답 이상 {src_n["fail"]} · 빈 상세 {src_n["empty"]}): '
+                     + ' · '.join(f'{ZONES[i]["title"]} {n}건' for i, n in sorted(detail_fail.items())))
     if errors:
         lines += ['', '수집 실패:'] + [f'- {e}' for e in errors]
     if untried:
