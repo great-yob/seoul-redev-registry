@@ -11,7 +11,8 @@ collect_listings.py 의 브라우저 토큰 단계로 통과한다. 국토부 �
   매번 origin/main 으로 맞춘 뒤 돌고, 이 파일이 바뀌었으면 새 판으로 다시 띄운다.
 - collect_listings.py → node site/build.mjs(파서 규약 검사) → regions/listings·data/listings 만 커밋해 main 에 push.
   push 가 거부되면 rebase 후 1회 재시도. Pages 는 사용자 자격으로 push 한 regions/** 변경이라 pages.yml 이 스스로 돈다.
-- 실패하면 GitHub 이슈를 연다(러너 시절 Actions 실패 메일 대신). 회차 로그는 LOG_DIR/YYYY-MM-DD.log.
+- 실패하면 GitHub 이슈를 연다(러너 시절 Actions 실패 메일 대신). 회차 로그는 LOG_DIR/YYYY-MM-DD.log,
+  상세 누락 첫 응답 원본은 LOG_DIR/YYYY-MM-DD.detail/(collect_listings.py --dump-dir).
 - PC 가 꺼져 있어 놓친 실행은 다음에 켜질 때 곧바로 돈다(작업 설정 StartWhenAvailable).
 """
 import datetime as dt
@@ -117,7 +118,8 @@ def report_failure(why):
 def collect():
     py = console_python()
     summary = os.path.join(LOG_DIR, f'{today}.summary.md')
-    r = run([py, 'tools/collect_listings.py', '--summary', summary], check=False)
+    dump = os.path.join(LOG_DIR, f'{today}.detail')   # 상세 누락 첫 응답 원본(종류마다 1건) — 클론 밖이라 커밋되지 않는다
+    r = run([py, 'tools/collect_listings.py', '--summary', summary, '--dump-dir', dump], check=False)
     if r.returncode:
         raise RuntimeError(f'collect_listings.py exit {r.returncode}')
     run([shutil.which('node') or 'node', 'site/build.mjs'])
