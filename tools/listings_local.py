@@ -14,8 +14,8 @@
 - 바탕화면 「매물 반영」(= --manual)이 다운로드 폴더에서 MANUAL_MAX_AGE_DAYS 안의 저장본을 모아 collect_listings.py --from-dir 로
   반영하고(상세는 브이월드, 재개발닷컴 요청 0건) 자동 회차와 같은 경로로 커밋·push 한다. 결과는 알림창으로 보인다.
   성공하면 쓴 저장본을 다운로드 폴더에서 치우고 LOG_DIR/YYYY-MM-DD.manual/ 에 남긴다. 실패는 이슈를 열지 않는다(사람이 앞에 있다).
-- 브이월드 키: 전용 클론에는 .env 가 없다. --install·--install-manual 이 세션 저장소 .env 의 VWORLD_API_KEY 한 줄을
-  HOME/.env 로 옮기고, 실행기가 그 값을 수집기 환경변수로 넘긴다.
+- 키: 전용 클론에는 .env 가 없다. --install·--install-manual 이 세션 저장소 .env 의 VWORLD_API_KEY(필수)·MOLIT_API_KEY_DECODED
+  (건축HUB 연면적, 있으면)를 HOME/.env 로 옮기고(빠진 키만 더함), 실행기가 그 값을 수집기 환경변수로 넘긴다.
 
 왜 PC 인가: 재개발닷컴(CloudFront + AWS WAF)이 2026-10-23부터 클라우드 IP(GitHub 러너)를 헤더 없는 403 으로 막는다 —
 헤드리스 브라우저로도 토큰이 안 나왔다(run 39869465784). 가정용 IP 의 PC 는 Challenge(202)만 걸리고
@@ -102,34 +102,37 @@ def origin_url():
                           check=True, creationflags=NO_WINDOW).stdout.strip()
 
 
-def read_key(path):
-    """.env 형식 파일의 VWORLD_API_KEY 값. 없으면 None. 값은 출력하지 않는다."""
+KEYS = ('VWORLD_API_KEY', 'MOLIT_API_KEY_DECODED')   # 브이월드(필지·좌표) 필수 · 국토부(건축HUB 연면적) 있으면 쓴다
+
+
+def read_key(path, name='VWORLD_API_KEY'):
+    """.env 형식 파일의 name 값. 없으면 None. 값은 출력하지 않는다."""
     if not os.path.exists(path):
         return None
     for ln in open(path, encoding='utf-8'):
-        name, _, val = ln.strip().partition('=')
-        if name.strip() == 'VWORLD_API_KEY' and val.strip():
+        n, _, val = ln.strip().partition('=')
+        if n.strip() == name and val.strip():
             return val.strip().strip('"').strip("'")
     return None
 
 
 def ensure_key():
-    """전용 클론에는 .env 가 없다 — 세션 저장소 .env 의 브이월드 키를 HOME/.env 로 옮긴다(한 번)."""
-    if read_key(KEY_FILE):
-        return
+    """전용 클론에는 .env 가 없다 — 세션 저장소 .env 의 KEYS 를 HOME/.env 로 옮긴다. 이미 있는 줄은 두고 빠진 키만 더한다."""
     src = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env'))
-    k = read_key(src)
-    if not k:
+    have = {n: read_key(KEY_FILE, n) for n in KEYS}
+    add = {n: read_key(src, n) for n in KEYS if not have[n]}
+    add = {n: v for n, v in add.items() if v}
+    if not (have['VWORLD_API_KEY'] or add.get('VWORLD_API_KEY')):
         sys.exit(f'VWORLD_API_KEY 를 찾지 못했다 — {src} 또는 {KEY_FILE} 에 `VWORLD_API_KEY=…` 한 줄을 둔다')
-    os.makedirs(HOME, exist_ok=True)
-    with open(KEY_FILE, 'w', encoding='utf-8') as f:
-        f.write(f'VWORLD_API_KEY={k}\n')
-    print(f'브이월드 키 → {KEY_FILE}')
+    if add:
+        os.makedirs(HOME, exist_ok=True)
+        with open(KEY_FILE, 'a', encoding='utf-8') as f:
+            f.writelines(f'{n}={v}\n' for n, v in add.items())
+        print(f'키 {", ".join(add)} → {KEY_FILE}')
 
 
 def key_env():
-    k = read_key(KEY_FILE)
-    return {'VWORLD_API_KEY': k} if k else {}
+    return {n: v for n in KEYS for v in [read_key(KEY_FILE, n)] if v}
 
 
 def install():
