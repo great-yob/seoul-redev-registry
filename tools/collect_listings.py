@@ -25,8 +25,10 @@ PC 작업 스케줄러가 매주 목요일 09:00 KST에 tools/listings_local.py 
   재개발닷컴이 11-05 부터 자동 클라이언트에 상세를 주지 않고(사람 브라우저에는 준다) 이어 CAPTCHA 로 막아, 재개발닷컴에는 목록만 보낸다.
   주소(「장위동 262-14」)는 구역별 법정동코드 표 ZONES `bjd` 로 PNU 가 된다(코드는 브이월드 지오코더 level4LC 로 확정).
   표에 없는 동이면 그 매물은 상세 누락으로 센다 — 표에 동을 더한다. 2026-11-06 캐시(재개발닷컴 상세) 33건 대조: 필지면적 33/33,
-  연면적 28/33 일치·5건은 브이월드 건축물 연령이 빈다(2018년 이후 사용승인분 전부 + 오래된 건물 일부). 그런 매물은 연면적 없이
-  (다세대는 지분 미상) 채점되고 요약에 건수가 남는다. 같은 동이 두 번 오는 응답은 건물 식별번호로 지운다.
+  연면적 28/33 일치·5건은 브이월드 건축물 연령이 빈다(2018년 이후 사용승인분 전부 + 오래된 건물 일부).
+  그래서 연면적은 **건축HUB 건축물대장 표제부**(getBrTitleInfo, 주건축물 totArea 합, 국토부 키)를 먼저 쓴다 — 그 5건 + 두 동 필지 6/6 이
+  재개발닷컴 값과 같았다. 건축HUB 가 비거나 실패하면 브이월드 건축물 연령(같은 동 중복은 식별번호로 지움). 둘 다 비면 연면적 없이
+  (다세대는 지분 미상) 채점되고 요약에 건수가 남는다.
   결과는 매물 id 별로 `data/listings/details.json` 에 캐시한다. 새 매물과 DETAIL_TTL_DAYS 지난 브이월드 값만 다시 받는다 —
   재개발닷컴에서 받아 둔 값은 다시 받을 길이 없으니 만료시키지 않는다.
 - 재개발닷컴 요청은 실행당 JAEGEBAL_MAX_REQUESTS 건이 상한이다(브라우저 토큰 발급의 문서 요청 포함). 넘기 전에 멈춘다.
@@ -51,6 +53,7 @@ PC 작업 스케줄러가 매주 목요일 09:00 KST에 tools/listings_local.py 
   상세 누락은 조회 오류 · 필지 자료 없음(PNU 가 틀렸다) · 법정동 미등록으로 나눠 세고, 종류마다 첫 사례를 로그에 한 줄 찍는다.
 - 의존성: requests + playwright(chromium). playwright 가 없으면 토큰 단계만 건너뛴다.
   브이월드 키 `VWORLD_API_KEY`(환경변수 또는 저장소 `.env`)가 없으면 exit 1 — 상세 없이 채점하면 지분 두 축이 중간값으로 몰린다.
+  국토부 키 `MOLIT_API_KEY_DECODED`(같은 곳)가 없으면 건축HUB 를 건너뛰고 연면적은 브이월드만 쓴다.
 """
 import argparse
 import datetime as dt
@@ -376,17 +379,56 @@ ned.headers.update({'User-Agent': 'seoul-redev-registry/collect_listings (+https
 MISS_LABEL = dict(fail='조회 오류', empty='필지 자료 없음', nopnu='법정동 미등록')
 
 
-def vworld_key():
-    k = os.environ.get('VWORLD_API_KEY')
+def env_key(name):
+    """환경변수, 없으면 저장소 .env 의 같은 이름 값. 값은 출력하지 않는다."""
+    k = os.environ.get(name)
     if k:
         return k.strip()
     p = os.path.join(ROOT, '.env')
     if os.path.exists(p):
         for ln in io.open(p, encoding='utf-8'):
-            name, _, val = ln.strip().partition('=')
-            if name.strip() == 'VWORLD_API_KEY':
+            n, _, val = ln.strip().partition('=')
+            if n.strip() == name:
                 return val.strip().strip('"').strip("'")
     return None
+
+
+def vworld_key():
+    return env_key('VWORLD_API_KEY')
+
+
+HUB_URL = 'https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo'
+_hub_key = None                # main 이 MOLIT_API_KEY_DECODED 로 채운다. 없으면 건축HUB 를 건너뛰고 브이월드만 쓴다
+_hub_calls = 0
+_bsrc = {}                     # 이번에 받은 필지의 연면적 출처별 건수(hub·vworld·none)
+
+
+def hub_buildings(pnu):
+    """(건물 목록 또는 None, 사유) — 건축HUB 건축물대장 표제부(getBrTitleInfo)의 주건축물 연면적(totArea). 부속건축물은 뺀다.
+    2026-11-06 브이월드 건축물 연령이 비던 5필지 + 두 동 필지(천호동 338-32) 6건 모두 재개발닷컴 값과 같았다. [] 는 '대장 없음'."""
+    global _hub_calls
+    q = dict(serviceKey=_hub_key, sigunguCd=pnu[:5], bjdongCd=pnu[5:10], platGbCd='0' if pnu[10] == '1' else '1',
+             bun=pnu[11:15], ji=pnu[15:19], numOfRows=100, pageNo=1, _type='json')
+    err = None
+    for i in range(3):
+        _hub_calls += 1
+        try:
+            r = requests.get(HUB_URL, params=q, timeout=30)
+            if r.status_code != 200:
+                err = f'http:{r.status_code}'
+            else:
+                body = r.json()['response']['body']
+                items = (body.get('items') or {}).get('item') or [] if isinstance(body.get('items'), dict) else []
+                items = [items] if isinstance(items, dict) else items
+                return [dict(tot_area=num(it.get('totArea'))) for it in items if it.get('mainAtchGbCdNm') != '부속건축물'], None
+        except requests.RequestException as e:
+            err = f'network:{type(e).__name__}'
+        except (ValueError, KeyError, TypeError) as e:
+            err = f'nonjson:{type(e).__name__}'
+        if not (err.startswith(('network', 'http:5'))):
+            break
+        time.sleep(0.5 * (i + 1))
+    return None, err
 
 
 def ned_rows(op, root, pnu):
@@ -459,7 +501,8 @@ def ned_point(Z, addr):
 def ned_detail(Z, addr):
     """(상세, 출처, 사유). 상세는 채점이 읽는 모양 {address:{land_area, location}, buildings:[{tot_area}], right_basedate} + pnu·src.
     출처: fetch 받음 · nopnu 주소→PNU 실패 · fail 조회 오류 · empty 토지특성 자료 없음(필지가 없다 = PNU 가 틀렸다).
-    건축물 연령이 비면(2018년 이후 사용승인·나대지) buildings=[] 로 받는다 — 누락이 아니다. 좌표는 지오코더(ned_point)."""
+    연면적은 건축HUB 표제부를 먼저 쓰고(키가 있을 때), 비거나 실패하면 브이월드 건축물 연령으로 대신한다(bsrc 에 출처).
+    둘 다 비면 buildings=[] 로 받는다 — 누락이 아니다. 좌표는 지오코더(ned_point)."""
     pnu, why = pnu_for(Z, addr)
     if not pnu:
         return None, 'nopnu', why
@@ -468,15 +511,23 @@ def ned_detail(Z, addr):
         return None, 'fail', f'토지특성 {err} (PNU {pnu})'
     if not land:
         return None, 'empty', f'토지특성 0행 (PNU {pnu})'
-    bld, err = ned_rows('getBuildingAge', 'buildingAges', pnu)
-    if bld is None:
-        return None, 'fail', f'건축물 연령 {err} (PNU {pnu})'
+    blds, bsrc = None, None
+    if _hub_key:
+        blds, _ = hub_buildings(pnu)
+        bsrc = 'hub' if blds else None
+    if not blds:
+        bld, err = ned_rows('getBuildingAge', 'buildingAges', pnu)
+        if bld is None and blds is None:
+            return None, 'fail', f'건축물 연령 {err} (PNU {pnu})'
+        # 같은 동이 두 번 오기도 한다(천호동 338-32 나동 — 식별번호 같음). 그대로 더하면 1979㎡, 지우면 재개발닷컴과 같은 1319.41㎡
+        uniq = {b.get('buldIdntfcNo') or (b.get('buldDongNm'), b.get('buldTotar'), b.get('useConfmDe')): b for b in bld or []}
+        blds = [dict(tot_area=num(b.get('buldTotar'))) for b in uniq.values()]
+        bsrc = 'vworld' if blds else 'none'
+    _bsrc[bsrc] = _bsrc.get(bsrc, 0) + 1
     latest = max(land, key=lambda r: str(r.get('stdrYear') or ''))   # stdrYear 없이 부르면 2013~ 연도별로 온다
-    # 같은 동이 두 번 오기도 한다(천호동 338-32 나동 — 식별번호 같음). 그대로 더하면 1979㎡, 지우면 재개발닷컴과 같은 1319.41㎡
-    uniq = {b.get('buldIdntfcNo') or (b.get('buldDongNm'), b.get('buldTotar'), b.get('useConfmDe')): b for b in bld}
     return dict(address=dict(land_area=num(latest.get('lndpclAr')), location=ned_point(Z, addr)),
-                buildings=[dict(tot_area=num(b.get('buldTotar'))) for b in uniq.values()],
-                right_basedate=None, pnu=pnu, src='vworld'), 'fetch', None
+                buildings=blds, right_basedate=None, pnu=pnu, src='vworld', bsrc=bsrc,
+                tried_hub=bool(_hub_key)), 'fetch', None
 
 
 # ---------------------------------------------------------------- 상세 캐시 (data/listings/details.json)
@@ -505,8 +556,10 @@ def detail_for(Z, aid, a, cache, today, memo):
     """
     key = str(aid)
     hit = cache.get(key)
-    if hit and (hit.get('src') != 'vworld'
-                or (dt.date.fromisoformat(today) - dt.date.fromisoformat(hit['fetched'])).days < DETAIL_TTL_DAYS):
+    # 연면적이 빈 브이월드 값을 건축HUB 없이 받았으면(2026-11-06 첫 수동 반영분) 건축HUB 가 열린 뒤 한 번 다시 받는다
+    refill = bool(hit and _hub_key and hit.get('src') == 'vworld' and not hit.get('buildings') and not hit.get('tried_hub'))
+    if hit and not refill and (hit.get('src') != 'vworld'
+                               or (dt.date.fromisoformat(today) - dt.date.fromisoformat(hit['fetched'])).days < DETAIL_TTL_DAYS):
         return hit, 'cache'
     addr = a.get('address')
     if masked(addr):   # 지번 비공개 — 찌를 필지가 없다. 누락으로 세지 않는다(DECISIONS #19 9차)
@@ -812,6 +865,8 @@ def main():
         print('FAIL  VWORLD_API_KEY 없음(환경변수·.env) — 상세(필지면적·연면적)를 받을 수 없어 수집하지 않는다', file=sys.stderr)
         return 1
     ned.params = dict(key=key)
+    global _hub_key
+    _hub_key = env_key('MOLIT_API_KEY_DECODED')   # 건축HUB 표제부 — 없으면 연면적은 브이월드만
     if args.out:
         os.makedirs(args.out, exist_ok=True)
     cache_path = os.path.join(args.history_dir, 'details.json')
@@ -909,8 +964,11 @@ def main():
               f'- 재개발닷컴 요청 {_sent}건' + (' — 수동 저장본 ' + f'{len(first)}구역' if manual else f' (상한 {JAEGEBAL_MAX_REQUESTS})')]
     if src_n['masked']:
         lines.append(f'- 지번 비공개 {src_n["masked"]}건 — 재개발닷컴이 네이버 출처 매물의 지번을 가림(2026-11-06~, 로그인해도 같음). 표에 남기되 지분·단가 없이 채점(DECISIONS #19 9차)')
+    if _bsrc:
+        lines.append(f'- 연면적 출처(이번에 받은 필지): 건축HUB 표제부 {_bsrc.get("hub", 0)} · 브이월드 건축물 연령 {_bsrc.get("vworld", 0)} · 없음 {_bsrc.get("none", 0)}'
+                     + (f' (건축HUB 호출 {_hub_calls}회)' if _hub_calls else ' (건축HUB 키 없음)'))
     if nobldg:   # 연면적이 없으면 다세대 지분이 비고 그 축은 중간값이 된다 — 조용히 넘기지 않는다
-        lines.append(f'- 건축물 연령 자료 없음 {nobldg}건 — 브이월드 공백(2018년 이후 사용승인분 전부·오래된 건물 일부). 연면적 없이 채점(다세대는 지분 미상)')
+        lines.append(f'- 연면적 없음 {nobldg}건 — 건축HUB·브이월드 모두 비거나 지난 값 그대로. 연면적 없이 채점(다세대는 지분 미상)')
     if short:
         lines.append('- 저장본 목록이 일부만(저장 건수/등록 건수): ' + ' · '.join(short) + ' — 2쪽 이상은 저장되지 않는다')
     if _tokens:
