@@ -9,6 +9,8 @@
 - 사람이 평소 브라우저로 구역 목록 페이지를 연다 — CAPTCHA 가 뜨면 사람이 푼다. 북마클릿 「매물 저장」을 누르면 그 페이지에
   이미 받아져 있는 매물 데이터(플라이트 스크립트)를 `jaegebal-<develop id>-YYYYMMDD-HHMM.txt` 로 내려받고 다음 구역 페이지로 간다.
   북마클릿은 추가 요청을 보내지 않는다 — 한 번 누를 때 사람이 보는 페이지 한 장이다. 마지막 구역이면 알림만 띄운다.
+  매물 수(ask_count)보다 적게 담긴 구역은 다음 쪽(?page=N, `…-pN.txt`)을 먼저 연다 — 새 매물이 없으면 다음 구역으로.
+  새 탭에서는 북마클릿이 돌지 않아, 첫 구역을 여는 일반 북마크 「매물 시작」을 함께 둔다.
 - 바탕화면 「매물 반영」(= --manual)이 다운로드 폴더에서 MANUAL_MAX_AGE_DAYS 안의 저장본을 모아 collect_listings.py --from-dir 로
   반영하고(상세는 브이월드, 재개발닷컴 요청 0건) 자동 회차와 같은 경로로 커밋·push 한다. 결과는 알림창으로 보인다.
   성공하면 쓴 저장본을 다운로드 폴더에서 치우고 LOG_DIR/YYYY-MM-DD.manual/ 에 남긴다. 실패는 이슈를 열지 않는다(사람이 앞에 있다).
@@ -236,21 +238,28 @@ def run_manual():
 
 
 BOOKMARKLET = r"""
-(()=>{const Z=__ZONES__,H='https://jaegebal.com/develops/',go=i=>{location.href=H+Z[i][0]+'/asks'};
-const m=location.href.match(/^https:\/\/jaegebal\.com\/develops\/(\d+)\/asks\/?(?:[?\x23].*)?$/);
-if(!m){if(confirm('재개발닷컴 매물 저장을 시작합니다 — 1/'+Z.length+' '+Z[0][1]))go(0);return}
+(()=>{const Z=__ZONES__,H='https://jaegebal.com/develops/',go=(i,n)=>{location.href=H+Z[i][0]+'/asks'+(n>1?'?page='+n:'')};
+const m=location.href.match(/^https:\/\/jaegebal\.com\/develops\/(\d+)\/asks\/?(?:\?([^\x23]*))?(?:\x23.*)?$/);
+if(!m){if(confirm('재개발닷컴 매물 저장을 시작합니다 — 1/'+Z.length+' '+Z[0][1]))go(0,1);return}
 const i=Z.findIndex(z=>z[0]===m[1]);
 if(i<0){alert('비교 구역 페이지가 아닙니다 — 다른 페이지에서 누르면 첫 구역부터 시작합니다');return}
+const pg=+((/(?:^|&)page=(\d+)/.exec(m[2]||'')||[])[1]||1);
 let f='scripts',t=[...document.scripts].map(s=>s.textContent).filter(x=>x.indexOf('self.__next_f')>=0).join('\n');
 const has=x=>x.indexOf('develop_id')>=0||x.indexOf('ask_count')>=0;
 if(!has(t)&&self.__next_f){f='next_f';t=self.__next_f.map(x=>typeof x[1]=='string'?x[1]:'').join('')}
 const ids=[...new Set([...t.matchAll(/develop_id\\?":(\d+),\\?"develop_title/g)].map(x=>x[1]))];
 if(!has(t)||(ids.length&&ids.indexOf(m[1])<0)){alert('이 페이지의 매물 데이터가 아직 없습니다 — 새로고침(F5) 뒤 다시 누르세요');return}
+const mine=[...new Set([...t.matchAll(/\\?"id\\?":(\d+),\\?"code\\?":\\?"[^"\\]*\\?",\\?"develop_id\\?":(\d+),/g)].filter(x=>x[2]===m[1]).map(x=>x[1]))];
+const cnt=+((/\\?"ask_count\\?":(\d+)/.exec(t)||[])[1]||0);
+let seen=[];try{seen=pg>1?JSON.parse(sessionStorage.getItem('jgb'+m[1])||'[]'):[]}catch(e){}
+const fresh=mine.filter(x=>seen.indexOf(x)<0);seen=seen.concat(fresh);try{sessionStorage.setItem('jgb'+m[1],JSON.stringify(seen))}catch(e){}
+const nxt=()=>{if(pg<5&&fresh.length&&cnt>seen.length)go(i,pg+1);else if(i+1<Z.length)go(i+1,1);else alert('완료 '+Z.length+'/'+Z.length+' — 바탕화면 「매물 반영」을 더블클릭하세요')};
+if(pg>1&&!fresh.length){nxt();return}
 const d=new Date(),p=n=>String(n).padStart(2,'0'),s=''+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'-'+p(d.getHours())+p(d.getMinutes());
 const a=document.createElement('a');
 a.href=URL.createObjectURL(new Blob(['<!-- fmt='+f+' url='+location.href+' saved='+s+' -->\n'+t],{type:'text/plain;charset=utf-8'}));
-a.download='jaegebal-'+m[1]+'-'+s+'.txt';document.body.appendChild(a);a.click();a.remove();
-setTimeout(()=>{if(i+1<Z.length)go(i+1);else alert('완료 '+Z.length+'/'+Z.length+' — 바탕화면 「매물 반영」을 더블클릭하세요')},800)})()
+a.download='jaegebal-'+m[1]+'-'+s+(pg>1?'-p'+pg:'')+'.txt';document.body.appendChild(a);a.click();a.remove();
+setTimeout(nxt,800)})()
 """
 
 PAGE = """<!doctype html>
@@ -265,10 +274,10 @@ code{{background:#f2f2f2;padding:1px 5px;border-radius:4px}}
 </style></head><body>
 <h1>매물 수동 저장</h1>
 <p class="sub">재개발닷컴이 자동 수집을 막는 동안 쓰는 경로입니다. 일주일에 한 번, 약 2분.</p>
-<p><a class="bm" href="{href}">매물 저장</a> ← 이 버튼을 <b>북마크바로 끌어다 놓으세요</b> (북마크바가 안 보이면 <code>Ctrl+Shift+B</code>). 처음 한 번만.</p>
+<p><a class="bm" href="{href}">매물 저장</a> <a class="bm" href="{start}">매물 시작</a> ← 두 버튼을 <b>북마크바로 끌어다 놓으세요</b> (북마크바가 안 보이면 <code>Ctrl+Shift+B</code>). 처음 한 번만.</p>
 <ol>
-<li>아무 웹페이지에서 북마크 <b>「매물 저장」</b>을 누릅니다 → 첫 구역({first}) 매물 페이지가 열립니다.</li>
-<li>페이지가 다 뜨면 <b>「매물 저장」</b>을 누릅니다 → 파일이 내려받아지고 다음 구역으로 넘어갑니다. {n}번 반복하면 「완료」 알림이 뜹니다.</li>
+<li>북마크 <b>「매물 시작」</b>을 누릅니다 → 첫 구역({first}) 매물 페이지가 열립니다. 새 탭에서는 「매물 저장」이 동작하지 않아 시작용 링크를 따로 둡니다.</li>
+<li>페이지가 다 뜨면 <b>「매물 저장」</b>을 누릅니다 → 파일이 내려받아지고 다음으로 넘어갑니다. 매물이 2쪽 이상인 구역은 다음 쪽이 먼저 열립니다(그 쪽도 한 번 더 누름). 마지막 구역에서 「완료」 알림이 뜹니다.</li>
 <li>바탕화면 <b>「매물 반영」</b>을 더블클릭합니다 → 반영·push 결과가 알림창으로 뜹니다. 페이지는 1~2분 뒤 갱신됩니다.</li>
 </ol>
 <p class="note">
@@ -299,7 +308,8 @@ def install_manual():
     zones = [[Z['did'], Z['title']] for Z in ZONES]
     os.makedirs(HOME, exist_ok=True)
     with open(MANUAL_HTML, 'w', encoding='utf-8') as f:
-        f.write(PAGE.format(href=html.escape(bookmarklet(zones), quote=True), first=zones[0][1], n=len(zones), max_age=MANUAL_MAX_AGE_DAYS))
+        f.write(PAGE.format(href=html.escape(bookmarklet(zones), quote=True), start=f'https://jaegebal.com/develops/{zones[0][0]}/asks',
+                            first=zones[0][1], max_age=MANUAL_MAX_AGE_DAYS))
     pyw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
     script = os.path.join(CLONE, 'tools', 'listings_local.py')
     ps = f"""
