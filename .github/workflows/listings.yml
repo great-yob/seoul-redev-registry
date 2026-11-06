@@ -40,8 +40,10 @@ jobs:
 
       # 규칙 비교시세(00 §3). 키(secrets)가 없으면 exit 2 로 건너뛴다.
       # 국토부 호출이 하나라도 실패하면 .partial.jsonl 로 떨어지고(gitignore) 스텝이 실패한다 — 커밋하지 않는다
+      # 단계 상한 20분 — 국토부가 느린 주가 있다(2026-11-06 1차 12분 초과로 끊김, 재실행 11분 17초. 평소 7분).
+      # 러너 IP 차단이면 호출마다 백오프가 쌓여 20분 안에 끝나지 않는다 — 그때 끊긴다. job 25분 안에 빌드·커밋 몫 5분
       - name: Compare (국토부 실거래 → data/compare 규칙 비교시세 회차 스냅샷)
-        timeout-minutes: 12
+        timeout-minutes: 20
         env:
           MOLIT_API_KEY_DECODED: ${{ secrets.MOLIT_API_KEY_DECODED }}
           VWORLD_API_KEY: ${{ secrets.VWORLD_API_KEY }}
