@@ -4,7 +4,8 @@ PC 작업 스케줄러가 매주 목요일 09:00 KST에 tools/listings_local.py 
 2026-10-23 러너에서 PC 로 옮겼다(DECISIONS #19 7차). 손으로 돌릴 때도 같은 명령이다.
     python tools/collect_listings.py [--only sangdo16,jangwi15] [--dry-run] [--out DIR] [--summary FILE]
                                      [--min-price 6.0] [--max-price 8.0]   # 하한 이상 ~ 상한 이하
-                                     [--history-dir data/listings] [--dump-dir DIR]   # 상세 누락 응답 원본 저장 위치
+                                     [--history-dir data/listings]
+                                     [--from-dir DIR]   # 사람이 브라우저로 저장한 목록 페이지로 — 재개발닷컴 요청 0건
 
 원칙 (DECISIONS #19)
 - 호가·매물은 D등급. 점수는 구역 내 상대 순위(100점, 랭크 정규화)이며 어떤 계산에도 쓰지 않는다.
@@ -19,8 +20,18 @@ PC 작업 스케줄러가 매주 목요일 09:00 KST에 tools/listings_local.py 
 - 요청은 전부 REQUEST_INTERVAL(8초) 간격으로 보낸다 — robots.txt `Crawl-delay: 1` 준수. 429(속도 규칙)로 쉬면 쉰 뒤 간격을 2배로(상한 INTERVAL_MAX).
   2026-10-23 PC 실행은 4초 간격에서 약 50건(3분 20초)마다 429 — 집계 창 4분 이상·문턱 약 50건으로 읽힌다. 10-16까지는 4초로 23분을 버텼다.
   재개발닷컴 WAF 가 한 실행의 약 190번째 요청부터 러너를 막아 1·2차 시도가 같은 자리에서 실패했다(2026-10-16, HTTP 405).
-- 상세 페이지는 매물 id 별로 `data/listings/details.json` 에 캐시한다. 새 매물과 DETAIL_TTL_DAYS 지난 것만 다시 받는다 —
-  필지면적·연면적·좌표는 같은 매물이면 바뀌지 않는다. 캐시를 지우면 다음 실행이 전부 다시 받는다(8초 간격으로 약 50분).
+- 상세(필지면적·연면적)는 재개발닷컴 상세 페이지가 아니라 **브이월드 NED** 에서 받는다(2026-11-06~): 토지특성 `lndpclAr`,
+  건축물 연령(건축물대장 표제부) `buldTotar` 합. 재개발닷컴 상세와 같은 값이다(장위동 262-14 대조 70㎡·346.78㎡·사용승인 1992-03-06).
+  재개발닷컴이 11-05 부터 자동 클라이언트에 상세를 주지 않고(사람 브라우저에는 준다) 이어 CAPTCHA 로 막아, 재개발닷컴에는 목록만 보낸다.
+  주소(「장위동 262-14」)는 구역별 법정동코드 표 ZONES `bjd` 로 PNU 가 된다(코드는 브이월드 지오코더 level4LC 로 확정).
+  표에 없는 동이면 그 매물은 상세 누락으로 센다 — 표에 동을 더한다. 2026-11-06 캐시(재개발닷컴 상세) 33건 대조: 필지면적 33/33,
+  연면적 28/33 일치·5건은 브이월드 건축물 연령이 빈다(2018년 이후 사용승인분 전부 + 오래된 건물 일부). 그런 매물은 연면적 없이
+  (다세대는 지분 미상) 채점되고 요약에 건수가 남는다. 같은 동이 두 번 오는 응답은 건물 식별번호로 지운다.
+  결과는 매물 id 별로 `data/listings/details.json` 에 캐시한다. 새 매물과 DETAIL_TTL_DAYS 지난 브이월드 값만 다시 받는다 —
+  재개발닷컴에서 받아 둔 값은 다시 받을 길이 없으니 만료시키지 않는다.
+- 재개발닷컴 요청은 실행당 JAEGEBAL_MAX_REQUESTS 건이 상한이다(브라우저 토큰 발급의 문서 요청 포함). 넘기 전에 멈춘다.
+- `--from-dir DIR`: 사람이 브라우저로 열어 저장한 목록 페이지(`listings_local.py --install-manual` 의 북마클릿이 만든
+  `jaegebal-<develop id>-YYYYMMDD-HHMM.txt`)를 읽는다 — 재개발닷컴 요청 0건. 저장본이 있는 구역만 갱신하고(부분 회차), 2바퀴째는 없다.
 - 2026-10-23부터 재개발닷컴은 첫 요청부터 AWS WAF Challenge(202, 브라우저 JS 로 토큰 발급)를 건다 — 요청 수와 무관하다.
   Challenge 응답이면 먼저 헤드리스 Chromium(Playwright)으로 그 페이지를 열어 `aws-waf-token` 쿠키를 받고, 쿠키와 브라우저 UA 를
   requests 세션에 옮겨 같은 요청을 다시 보낸다(실행당 TOKEN_REFRESHES 회). 토큰이 Challenge 를 면제하는 시간은 약 5분이라
@@ -34,16 +45,13 @@ PC 작업 스케줄러가 매주 목요일 09:00 KST에 tools/listings_local.py 
   그래도 실패한 구역은 전 구역 한 바퀴 뒤 쿨다운하고 한 번 더 돈다.
 - 조용히 틀리지 않는다: 재시도 후에도 목록 페이지가 200이 아니거나, 구역 상세 누락이 상한(10% 초과·3건 이상)이거나,
   전 구역 수집 합계(예산 필터 전) 0건이면 exit 1 → CI 실패, 커밋 없음. 상한 아래의 상세 누락 건수는 커밋 메시지 요약에 남긴다.
-  상세 누락은 응답 이상(200 아님·네트워크)과 빈 상세(200 인데 상세 객체 없음)로 나눠 센다.
-- 새로 받는 상세가 DETAIL_STREAK_STOP 건 연달아 누락이면 실행 전체를 그 자리에서 멈춘다(2바퀴째도 돌지 않는다).
-  2026-11-05 는 목록은 다 받고 새 상세만 0건이었는데, 구역 상한으로 11구역을 두 바퀴 돌며 헛요청 약 200건을 쌓았다 —
-  같은 날 사람 브라우저가 저장한 같은 상세는 현행 파서로 정상 추출됐다(구조 개편 아님). 그날 저녁 진단 1건은 토큰 직후 CAPTCHA.
-- `--dump-dir` 이면 상세 누락의 첫 응답을 종류마다 1건씩 그 디렉터리에 남긴다(본문 .html + 상태·헤더 .json, 쿠키는 이름만).
-  로그에는 상태·길이·제목·플라이트 청크 수만 찍는다 — 로그만으로 구조 개편인지 자동화 제한인지 가른다. listings_local.py 가 LOG_DIR 아래로 넘긴다.
-- 의존성: requests + playwright(chromium). playwright 가 없으면 토큰 단계만 건너뛴다. .env 불필요.
+  상세 누락은 조회 오류 · 필지 자료 없음(PNU 가 틀렸다) · 법정동 미등록으로 나눠 세고, 종류마다 첫 사례를 로그에 한 줄 찍는다.
+- 의존성: requests + playwright(chromium). playwright 가 없으면 토큰 단계만 건너뛴다.
+  브이월드 키 `VWORLD_API_KEY`(환경변수 또는 저장소 `.env`)가 없으면 exit 1 — 상세 없이 채점하면 지분 두 축이 중간값으로 몰린다.
 """
 import argparse
 import datetime as dt
+import glob
 import io
 import json
 import os
@@ -73,20 +81,22 @@ LAND_TYPES = ('단독', '토지', '다가구')
 # 주 1회 자동 갱신도 이 값으로 돈다. CLI 인자로만 덮어쓴다.
 PRICE_MIN, PRICE_MAX = 5.0, 8.0   # 억. PRICE_MIN 이상 ~ PRICE_MAX 이하(양끝 포함)
 
-# 구역 설정. basedate 는 레지스트리 확정값(없으면 None → 재개발닷컴 상세의 right_basedate 를 채점에만 사용).
+# 구역 설정. basedate 는 레지스트리 확정값(없으면 None → 상세 캐시에 남은 재개발닷컴 right_basedate 를 채점에만 사용).
+# bjd 는 매물 주소 동 이름 → 법정동코드 10자리(PNU 앞부분). 2026-11-06 브이월드 지오코더 level4LC 로 동마다 확정 —
+# 저장된 응답에서 거꾸로 뽑으면 틀린다(장위15 상월곡동을 1129014200 으로 찌른 Q15 태스크가 5건 전부 빈 응답이었다. 맞는 값 1129013700).
 # anchor 는 노트에 찍는 기준 앵커 문구(레지스트리 요약). 구역 파일의 사실이 바뀌면 여기도 맞춘다.
 ZONES = [
-    dict(name='dapsimni489', did='2153', title='답십리동 489', file='01_dapsimni489', basedate='2023-12-07', anchor='구역 내 2026 중개거래 중앙 5.90억(단독다가구 지문 복원 3건, A) · 실거래/개별주택가격 배율 2.70(9건, A) · 개별공시지가 중앙 396만원/㎡(378필지, A)'),
-    dict(name='jayang655', did='4641', title='자양1동 655', file='02_jayang655', basedate='2026-05-18', anchor='폴리곤 대조 구역 내 21건 중앙값 5.20억(2026, A) · 실거래/공시 배율 중앙 2.85(n=21, A)'),
-    dict(name='cheonho338', did='1738', title='천호동 338', file='03_cheonho338', basedate='2024-05-23', anchor='폴리곤 대조 구역 내 52건 중앙값 5.00억(2026, A) · 실거래/공시 배율 중앙 2.93(n=52, A)'),
-    dict(name='jangwi15', did='2327', title='장위15', file='04_jangwi15', basedate=None, anchor='233-42 실거래 10.00억(2026-06, 대지권 61.32㎡, A)'),
-    dict(name='sangdo16', did='3691', title='상도16', file='05_sangdo16', basedate='2025-05-23', anchor='구역 내 실거래 중앙값 4.60억 · 대지권27㎡+ 중앙값 5.70억(A)'),
-    dict(name='galhyeon510-1', did='4640', title='갈현동 510-1(갈현3)', file='06_galhyeon510-1', basedate='2026-07-01', anchor='폴리곤 대조 구역 내 78건 중앙값 2.51억(2026, A) · 실거래/공시 배율 중앙 1.92(n=69, A)'),
-    dict(name='sutaek2', did='4074', title='수택2', file='07_sutaek2', basedate='2023-07-14', anchor='폴리곤 대조 구역 내 149건 중앙값 4.35억(2026, A) · 고시 권리자 분양가 35평형 6.77억·보정률 1.65·비례율 108.13%(고시 제2023-94호, A)'),
-    dict(name='daejo212', did='4577', title='대조동212(가칭)', file='08_daejo212', basedate=None, anchor='폴리곤 대조 구역 내 52건 중앙값 3.23억(2026, A) · 권리산정기준일 미지정'),
-    dict(name='guui2donga', did='4141', title='구의2동A구역(구의동 46)', file='09_guui2dong46', basedate='2026-01-27', anchor='폴리곤 대조 구역 내 58건 중앙값 5.70억(2026, A) · 실거래/공시 배율 중앙 3.19(n=59, A) · 토허 대상'),
-    dict(name='seokchon-gobun1', did='4916', title='석촌고분1구역(석촌동 232 일대)', file='10_seokchon-gobun1', basedate=None, anchor='폴리곤 대조 구역 내 80건 중앙값 4.23억(2026, A) · 실거래/공시 배율 중앙 2.19(n=80, A) · 권리산정기준일 미지정 · 민간 도심복합'),
-    dict(name='seokchon-gobun2', did='4917', title='석촌고분2구역(석촌동 232 일대)', file='11_seokchon-gobun2', basedate=None, anchor='폴리곤 대조 구역 내 30건 중앙값 4.80억(2026, A) · 실거래/공시 배율 중앙 2.11(n=30, A) · 권리산정기준일 미지정 · 민간 도심복합'),
+    dict(name='dapsimni489', did='2153', title='답십리동 489', file='01_dapsimni489', bjd={'답십리동': '1123010500'}, basedate='2023-12-07', anchor='구역 내 2026 중개거래 중앙 5.90억(단독다가구 지문 복원 3건, A) · 실거래/개별주택가격 배율 2.70(9건, A) · 개별공시지가 중앙 396만원/㎡(378필지, A)'),
+    dict(name='jayang655', did='4641', title='자양1동 655', file='02_jayang655', bjd={'자양동': '1121510500'}, basedate='2026-05-18', anchor='폴리곤 대조 구역 내 21건 중앙값 5.20억(2026, A) · 실거래/공시 배율 중앙 2.85(n=21, A)'),
+    dict(name='cheonho338', did='1738', title='천호동 338', file='03_cheonho338', bjd={'천호동': '1174010900'}, basedate='2024-05-23', anchor='폴리곤 대조 구역 내 52건 중앙값 5.00억(2026, A) · 실거래/공시 배율 중앙 2.93(n=52, A)'),
+    dict(name='jangwi15', did='2327', title='장위15', file='04_jangwi15', bjd={'장위동': '1129013800', '상월곡동': '1129013700'}, basedate=None, anchor='233-42 실거래 10.00억(2026-06, 대지권 61.32㎡, A)'),
+    dict(name='sangdo16', did='3691', title='상도16', file='05_sangdo16', bjd={'상도동': '1159010200'}, basedate='2025-05-23', anchor='구역 내 실거래 중앙값 4.60억 · 대지권27㎡+ 중앙값 5.70억(A)'),
+    dict(name='galhyeon510-1', did='4640', title='갈현동 510-1(갈현3)', file='06_galhyeon510-1', bjd={'갈현동': '1138010400'}, basedate='2026-07-01', anchor='폴리곤 대조 구역 내 78건 중앙값 2.51억(2026, A) · 실거래/공시 배율 중앙 1.92(n=69, A)'),
+    dict(name='sutaek2', did='4074', title='수택2', file='07_sutaek2', bjd={'수택동': '4131010500'}, basedate='2023-07-14', anchor='폴리곤 대조 구역 내 149건 중앙값 4.35억(2026, A) · 고시 권리자 분양가 35평형 6.77억·보정률 1.65·비례율 108.13%(고시 제2023-94호, A)'),
+    dict(name='daejo212', did='4577', title='대조동212(가칭)', file='08_daejo212', bjd={'대조동': '1138010600'}, basedate=None, anchor='폴리곤 대조 구역 내 52건 중앙값 3.23억(2026, A) · 권리산정기준일 미지정'),
+    dict(name='guui2donga', did='4141', title='구의2동A구역(구의동 46)', file='09_guui2dong46', bjd={'구의동': '1121510300'}, basedate='2026-01-27', anchor='폴리곤 대조 구역 내 58건 중앙값 5.70억(2026, A) · 실거래/공시 배율 중앙 3.19(n=59, A) · 토허 대상'),
+    dict(name='seokchon-gobun1', did='4916', title='석촌고분1구역(석촌동 232 일대)', file='10_seokchon-gobun1', bjd={'석촌동': '1171010500'}, basedate=None, anchor='폴리곤 대조 구역 내 80건 중앙값 4.23억(2026, A) · 실거래/공시 배율 중앙 2.19(n=80, A) · 권리산정기준일 미지정 · 민간 도심복합'),
+    dict(name='seokchon-gobun2', did='4917', title='석촌고분2구역(석촌동 232 일대)', file='11_seokchon-gobun2', bjd={'석촌동': '1171010500'}, basedate=None, anchor='폴리곤 대조 구역 내 30건 중앙값 4.80억(2026, A) · 실거래/공시 배율 중앙 2.11(n=30, A) · 권리산정기준일 미지정 · 민간 도심복합'),
 ]
 
 session = requests.Session()
@@ -106,12 +116,14 @@ TOKEN_REFRESHES = 20            # 실행당 브라우저 토큰 발급 횟수. �
 TOKEN_WAIT = 30                 # 초. 브라우저가 Challenge 를 풀어 토큰 쿠키가 생기기를 기다리는 상한(실측 1초)
 TRANSIENT = {408, 425, 500, 502, 503, 504}
 LIST_BACKOFF = (15, 45, 90)     # 초. 목록 페이지 — 실패하면 구역 전체가 빠지므로 길게 기다린다
-DETAIL_BACKOFF = (5, 15)        # 초. 상세 페이지 — 건수가 많아 짧게
 ZONE_RETRY_WAIT = 180           # 초. 재시도까지 실패한 구역을 전 구역 한 바퀴 뒤 다시 도는 쿨다운
-DETAIL_TTL_DAYS = 28            # 상세 캐시 수명. 지나면 다시 받는다 — 권리산정기준일 지정 같은 드문 변경을 따라잡는다
+JAEGEBAL_MAX_REQUESTS = 30      # 실행당 재개발닷컴 요청 상한(토큰 발급 문서 2건씩 포함). 정상 회차는 목록 11~15건 + 토큰 1~2회.
+                                # 2026-11-05 는 상세까지 두 바퀴 약 410건을 보낸 뒤 CAPTCHA 가 걸렸다 — 그 규모를 다시 만들지 않는다
+DETAIL_TTL_DAYS = 28            # 상세 캐시 수명. 지나면 다시 받는다(브이월드라 재개발닷컴 요청과 무관)
 DETAIL_FAIL_RATIO, DETAIL_FAIL_MIN = 0.10, 3   # 구역 상세 누락이 10%를 넘고 3건 이상이면 그 구역은 실패 — 지분 두 축이 중간값으로 채점된 채 커밋되지 않게
-DETAIL_STREAK_STOP = 5          # 새로 받는 상세가 이만큼 연달아 누락이면 실행 전체를 멈춘다 — 매물별 우연이 아니라 상세 경로 전체가 막힌 것이다
-DETAIL_URL = 'https://jaegebal.com/develops/{}/asks/{}'
+NED_BASE = 'https://api.vworld.kr/ned/data/'
+NED_RETRIES = 4                 # 브이월드 일시 오류(URL_TYPE·5xx·네트워크) 재시도 — 같은 PNU 10번에 2~3번 URL_TYPE 이 난다(vworld_probe 실측)
+ADDR_RE = re.compile(r'^(\S+)\s+(산\s?)?(\d+)(?:-(\d+))?$')   # 「장위동 262-14」「갈현동 산12-3」 — 동 이름 + 지번
 
 
 class CollectError(Exception):
@@ -119,21 +131,30 @@ class CollectError(Exception):
 
 
 class Blocked(Exception):
-    """더 보내면 안 된다 — 차단 쉼 소진·CAPTCHA·상세 연속 누락. 실행 전체를 멈춘다. RequestException 이 아니라서 상세 쪽에서 삼켜지지 않는다."""
+    """더 보내면 안 된다 — 차단 쉼 소진·CAPTCHA·요청 상한. 실행 전체를 멈춘다. RequestException 이 아니라서 중간에 삼켜지지 않는다."""
 
 
 _last_sent = float('-inf')     # 마지막 요청 시각(monotonic)
 _pauses = 0                    # 이번 실행에서 쓴 차단 쉼 횟수
 _tokens = 0                    # 이번 실행에서 브라우저로 토큰을 받으려 한 횟수
 _interval = REQUEST_INTERVAL   # 지금 요청 간격. 429 로 쉬면 늘어난다
-_streak = []                   # 새로 받는 상세의 연속 누락 종류(fail·empty). 하나라도 받으면 비운다
-_dump_dir = None               # --dump-dir. 상세 누락 응답 원본을 남길 곳
-_dumped = set()                # 이미 남긴 누락 종류 — 종류마다 첫 1건만
+_sent = 0                      # 이번 실행에서 재개발닷컴에 보낸 요청 수(토큰 발급 문서 포함)
+_ned_calls = 0                 # 이번 실행의 브이월드 호출 수
+_first_miss = {}               # 상세 누락 종류 → 첫 사례(로그 한 줄만)
+
+
+def spend(n):
+    """재개발닷컴 요청 n 건을 쓴다 — 상한을 넘기게 되면 보내기 전에 Blocked."""
+    global _sent
+    if _sent + n > JAEGEBAL_MAX_REQUESTS:
+        raise Blocked(f'재개발닷컴 요청 상한 {JAEGEBAL_MAX_REQUESTS}건(이번 실행 {_sent}건) — 더 보내지 않는다')
+    _sent += n
 
 
 def send(url):
     """_interval 을 지켜 한 번 보낸다. 재시도까지 모든 요청이 여기를 지난다."""
     global _last_sent
+    spend(1)
     wait = _last_sent + _interval - time.monotonic()
     if wait > 0:
         time.sleep(wait)
@@ -158,6 +179,7 @@ def browser_token(url):
     except ImportError:
         print('   playwright 없음 — 브라우저 토큰 단계를 건너뛴다', file=sys.stderr)
         return False
+    spend(2)   # Challenge 페이지 + 풀린 뒤 재로드
     wait = _last_sent + _interval - time.monotonic()
     if wait > 0:
         time.sleep(wait)
@@ -262,25 +284,6 @@ def balanced_from(u, start):
     return None
 
 
-def enclosing(u, anchor, pos=0):
-    """anchor 문자열을 포함하는 가장 안쪽 미닫힘 객체"""
-    p = u.find(anchor, pos)
-    if p < 0:
-        return None
-    depth = 0
-    i = p
-    while i >= 0:
-        ch = u[i]
-        if ch == '}':
-            depth += 1
-        elif ch == '{':
-            if depth == 0:
-                break
-            depth -= 1
-        i -= 1
-    return balanced_from(u, i)
-
-
 def extract_asks(u):
     out = {}
     for m in re.finditer(r'"develop_id":(\d+),"develop_title"', u):
@@ -294,6 +297,15 @@ def extract_asks(u):
     return out
 
 
+def parse_meta(u):
+    """목록 1쪽의 구역 메타 — 매물 수 · 구역계 폴리곤 · 진행 단계."""
+    m = re.search(r'"ask_count":(\d+)', u)
+    am = re.search(r'"areas":(\[\[\[\[.*?\]\]\]\])', u)
+    sm = re.search(r'"detail_stage":"([^"]*)"', u)
+    return dict(ask_count=int(m.group(1)) if m else None, areas=json.loads(am.group(1)) if am else None,
+                stage=sm.group(1) if sm else None)
+
+
 def fetch_list(did):
     asks, meta = {}, {}
     for page in range(1, 8):
@@ -303,12 +315,7 @@ def fetch_list(did):
             raise CollectError(f'{url} → HTTP {r.status_code}')
         u = unesc(r.text)
         if page == 1:
-            m = re.search(r'"ask_count":(\d+)', u)
-            meta['ask_count'] = int(m.group(1)) if m else None
-            am = re.search(r'"areas":(\[\[\[\[.*?\]\]\]\])', u)
-            meta['areas'] = json.loads(am.group(1)) if am else None
-            sm = re.search(r'"detail_stage":"([^"]*)"', u)
-            meta['stage'] = sm.group(1) if sm else None
+            meta = parse_meta(u)
         got = extract_asks(u)
         new = [k for k in got if k not in asks]
         asks.update(got)
@@ -317,74 +324,121 @@ def fetch_list(did):
     return asks, meta
 
 
-def fetch_detail(did, aid):
-    """(상세, 응답). 상세는 재시도 후에도 실패하면 None, 받았는데 상세 객체가 없으면 {} — 호출 쪽이 둘 다 누락으로 센다.
-    응답은 requests 응답, 네트워크 예외면 그 설명 문자열 — 누락 원본 저장(dump_detail)용.
+def load_saved(did, from_dir):
+    """사람이 브라우저로 저장한 목록 페이지 → (asks, meta, 파일명). 그 구역 저장본이 없으면 None. 네트워크 요청 0건.
 
-    상세 객체 = `"id":<aid>` 를 품은 객체 가운데 address 가 dict 인 것(같은 id 의 목록 요약 객체는 address 가 문자열이다).
-    예전에는 "agent_name" 앵커로 잡았는데 2026-10-13~16 사이 사이트 개편으로 그 키가 사라져 전 매물이 빈 상세가 됐다 — 키 하나에 기대지 않는다.
-    """
-    try:
-        r = get(DETAIL_URL.format(did, aid), DETAIL_BACKOFF)
-    except requests.RequestException as e:
-        return None, f'{type(e).__name__}: {e}'
-    if r.status_code != 200:
-        return None, r
-    u = unesc(r.text)
-    for m in re.finditer(r'"id":%d[,}]' % int(aid), u):
+    파일은 `listings_local.py --install-manual` 의 북마클릿이 만든다: 첫 줄 `<!-- fmt=scripts|next_f url=… saved=… -->` 뒤에
+    페이지의 플라이트 스크립트 원문(scripts — HTTP 응답과 같은 이스케이프) 또는 이미 풀린 플라이트 문자열(next_f).
+    같은 구역 저장본이 여럿이면 파일명(…-YYYYMMDD-HHMM)이 가장 늦은 것을 쓴다. 다른 구역 데이터가 든 파일(사이트 안 링크로
+    옮겨 다니면 스크립트가 첫 페이지 것으로 남는다)과 매물 데이터가 없는 파일은 CollectError — 조용히 0건으로 쓰지 않는다."""
+    fs = sorted(glob.glob(os.path.join(from_dir, f'jaegebal-{did}-*.txt')))
+    if not fs:
+        return None
+    path = fs[-1]
+    name = os.path.basename(path)
+    t = io.open(path, encoding='utf-8').read()
+    u = t if t.startswith('<!-- fmt=next_f') else unesc(t)
+    ids = set(re.findall(r'"develop_id":(\d+),"develop_title"', u))
+    if ids and did not in ids:
+        raise CollectError(f'{name}: 다른 구역 데이터(develop {", ".join(sorted(ids))}) — 그 구역 페이지에서 새로고침(F5) 뒤 다시 저장')
+    meta = parse_meta(u)
+    asks = extract_asks(u)
+    if not asks and meta['ask_count'] is None:
+        raise CollectError(f'{name}: 매물 데이터 없음 — 페이지가 다 뜬 뒤 다시 저장')
+    return asks, meta, name
+
+
+# ---------------------------------------------------------------- 상세 (브이월드 NED)
+ned = requests.Session()
+# Referer 가 없으면 NED 는 INCORRECT_KEY 를 준다(vworld_probe.py docstring, 00 §6.9). 키는 main 이 params 에 싣는다
+ned.headers.update({'User-Agent': 'seoul-redev-registry/collect_listings (+https://great-yob.github.io/seoul-redev-registry)',
+                    'Referer': 'https://great-yob.github.io/seoul-redev-registry/'})
+MISS_LABEL = dict(fail='조회 오류', empty='필지 자료 없음', nopnu='법정동 미등록')
+
+
+def vworld_key():
+    k = os.environ.get('VWORLD_API_KEY')
+    if k:
+        return k.strip()
+    p = os.path.join(ROOT, '.env')
+    if os.path.exists(p):
+        for ln in io.open(p, encoding='utf-8'):
+            name, _, val = ln.strip().partition('=')
+            if name.strip() == 'VWORLD_API_KEY':
+                return val.strip().strip('"').strip("'")
+    return None
+
+
+def ned_rows(op, root, pnu):
+    """(rows, err). rows 가 [] 면 '자료 없음'(막힘 아님 — 빈 응답≠비대상, 00 §6.9), None 이면 err 가 사유."""
+    global _ned_calls
+    err = None
+    for i in range(NED_RETRIES + 1):
+        _ned_calls += 1
         try:
-            o = json.loads(enclosing(u, m.group(0)[:-1], m.start()))
-        except Exception:
-            continue
-        if isinstance(o.get('address'), dict):
-            return o, r
-    return {}, r
+            r = ned.get(NED_BASE + op, params=dict(pnu=pnu, format='json', numOfRows=1000, pageNo=1), timeout=25)
+            if r.status_code != 200:
+                err = f'http:{r.status_code}'
+            else:
+                js = r.json()
+                body = js.get(root) or js.get('response') or {}
+                code = (body.get('resultCode') or '').strip()
+                if not code or code in ('00', 'NORMAL_SERVICE'):
+                    rows = body.get('field') or []
+                    return ([rows] if isinstance(rows, dict) else rows), None
+                err = f'api:{code}'
+        except requests.RequestException as e:
+            err = f'network:{type(e).__name__}'
+        except ValueError:
+            err = 'nonjson'
+        if not (err.startswith(('network', 'http:5')) or err == 'api:URL_TYPE'):
+            break
+        time.sleep(0.5 * (i + 1))
+    return None, err
 
 
-def dump_detail(kind, url, aid, r):
-    """상세 누락의 첫 응답을 종류(fail·empty)마다 1건 _dump_dir 에 남기고 한 줄 진단을 로그에 찍는다.
-    본문은 .html, 상태·헤더·표지는 .json. 보낸 쿠키·받은 set-cookie 는 이름만 남긴다(WAF 토큰 값은 남기지 않는다).
-    로그 줄은 실패 이슈에 실리므로(공개 저장소) 상태·길이·제목·개수만 찍는다."""
-    if kind in _dumped:
-        return
-    _dumped.add(kind)
-    if isinstance(r, str):
-        meta, body = dict(url=url, error=r), ''
-        line = r
-    else:
-        body = r.text
-        t = re.search(r'<title>(.*?)</title>', body, re.S)
-        title = re.sub(r'\s+', ' ', t.group(1)).strip()[:80] if t else None
-        hits = len(re.findall(r'"id":%d[,}]' % int(aid), unesc(body)))
-        meta = dict(url=url, final_url=r.url, status=r.status_code,
-                    history=[[h.status_code, h.headers.get('location')] for h in r.history],
-                    headers={k: v for k, v in r.headers.items() if k.lower() != 'set-cookie'},
-                    set_cookie_names=sorted(r.cookies.keys()), sent_ua=r.request.headers.get('User-Agent'),
-                    sent_cookie_names=sorted(session.cookies.keys()), length=len(body), title=title,
-                    next_f=body.count('self.__next_f.push'), id_hits=hits)
-        line = (f'HTTP {r.status_code}' + (f' (리다이렉트 {len(r.history)}회 → {r.url})' if r.history else '')
-                + f' · {len(body)}자 · 제목 {title!r} · 플라이트 청크 {meta["next_f"]} · "id":{aid} {hits}곳')
-    where = ''
-    if _dump_dir:
-        os.makedirs(_dump_dir, exist_ok=True)
-        base = os.path.join(_dump_dir, f'detail-{kind}-{aid}')
-        with io.open(base + '.json', 'w', encoding='utf-8') as f:
-            json.dump(meta, f, ensure_ascii=False, indent=1)
-        with io.open(base + '.html', 'w', encoding='utf-8') as f:
-            f.write(body)
-        where = f' → {base}.html'
-    print(f'   상세 누락 첫 응답({"응답 이상" if kind == "fail" else "빈 상세"}): {line}{where}', file=sys.stderr)
+def num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def pnu_for(Z, addr):
+    """(PNU 19자리, 사유). 매물 주소 「장위동 262-14」 → 법정동코드(ZONES bjd) + 산(2)/일반(1) + 본번 4 + 부번 4."""
+    m = ADDR_RE.match((addr or '').strip())
+    if not m:
+        return None, f'주소 형식 밖 {addr!r}'
+    code = Z.get('bjd', {}).get(m.group(1))
+    if not code:
+        return None, f'ZONES bjd 에 없는 동 「{m.group(1)}」'
+    return f'{code}{"2" if m.group(2) else "1"}{int(m.group(3)):04d}{int(m.group(4) or 0):04d}', None
+
+
+def ned_detail(Z, addr):
+    """(상세, 출처, 사유). 상세는 채점이 읽는 모양 {address:{land_area, location}, buildings:[{tot_area}], right_basedate} + pnu·src.
+    출처: fetch 받음 · nopnu 주소→PNU 실패 · fail 조회 오류 · empty 토지특성 자료 없음(필지가 없다 = PNU 가 틀렸다).
+    건축물 연령이 비면(2018년 이후 사용승인·나대지) buildings=[] 로 받는다 — 누락이 아니다. 좌표는 목록에 있어 None."""
+    pnu, why = pnu_for(Z, addr)
+    if not pnu:
+        return None, 'nopnu', why
+    land, err = ned_rows('getLandCharacteristics', 'landCharacteristicss', pnu)
+    if land is None:
+        return None, 'fail', f'토지특성 {err} (PNU {pnu})'
+    if not land:
+        return None, 'empty', f'토지특성 0행 (PNU {pnu})'
+    bld, err = ned_rows('getBuildingAge', 'buildingAges', pnu)
+    if bld is None:
+        return None, 'fail', f'건축물 연령 {err} (PNU {pnu})'
+    latest = max(land, key=lambda r: str(r.get('stdrYear') or ''))   # stdrYear 없이 부르면 2013~ 연도별로 온다
+    # 같은 동이 두 번 오기도 한다(천호동 338-32 나동 — 식별번호 같음). 그대로 더하면 1979㎡, 지우면 재개발닷컴과 같은 1319.41㎡
+    uniq = {b.get('buldIdntfcNo') or (b.get('buldDongNm'), b.get('buldTotar'), b.get('useConfmDe')): b for b in bld}
+    return dict(address=dict(land_area=num(latest.get('lndpclAr')), location=None),
+                buildings=[dict(tot_area=num(b.get('buldTotar'))) for b in uniq.values()],
+                right_basedate=None, pnu=pnu, src='vworld'), 'fetch', None
 
 
 # ---------------------------------------------------------------- 상세 캐시 (data/listings/details.json)
-def trim_detail(d):
-    """채점이 읽는 필드만 score_zone 이 읽는 모양 그대로 남긴다 — 필지면적·좌표·연면적·권리산정기준일."""
-    ad = d.get('address') or {}
-    return dict(address=dict(land_area=ad.get('land_area'), location=ad.get('location')),
-                buildings=[dict(tot_area=b.get('tot_area')) for b in (d.get('buildings') or [])],
-                right_basedate=d.get('right_basedate'))
-
-
 def load_cache(path):
     if not os.path.exists(path):
         return {}
@@ -399,31 +453,35 @@ def save_cache(path, cache):
         f.write('{\n' + ',\n'.join(rows) + '\n}\n')
 
 
-def detail_for(did, aid, cache, today):
-    """캐시가 DETAIL_TTL_DAYS 안이면 그대로, 아니면 받아서 캐시에 넣는다. (상세 또는 None, 출처) 를 돌려준다.
+def detail_for(Z, aid, a, cache, today, memo):
+    """캐시가 DETAIL_TTL_DAYS 안이면 그대로, 아니면 브이월드에서 받아 캐시에 넣는다. (상세 또는 None, 출처) 를 돌려준다.
 
-    출처: cache 캐시 · fetch 새로 받음 · stale 다시 받기 실패라 지난 값 · fail 재시도 후 실패 · empty 받았으나 상세 객체 없음.
-    fail·empty 는 둘 다 누락이다. 빈 상세({})는 캐시하지 않는다 — 다음 회차에 다시 받는다.
-    새로 받기가 DETAIL_STREAK_STOP 건 연달아 실패하면(stale 포함 — 받기 실패는 같다) Blocked 로 실행을 멈춘다.
+    출처: cache 캐시 · fetch 새로 받음 · stale 다시 받기 실패라 지난 값 · fail·empty·nopnu 누락(ned_detail).
+    memo 는 이번 실행의 주소별 결과 — 같은 필지의 여러 호(다세대)를 한 번만 부른다. 누락은 캐시하지 않는다(다음 회차에 다시).
+    캐시에는 2026-11-05 까지 재개발닷컴 상세에서 받은 값(src 없음)이 있다. 다시 받을 길이 없고 필지·연면적은 바뀌지 않으므로
+    만료시키지 않는다 — 브이월드 건축물 연령은 오래된 건물도 비어 있는 일이 있어(33건 대조 중 5건) 다시 받으면 오히려 값이 빈다.
+    브이월드 값은 DETAIL_TTL_DAYS 마다 다시 받되, 새 응답에 건물이 비고 지난 값에 있으면 지난 건물 값을 남긴다.
     """
     key = str(aid)
     hit = cache.get(key)
-    if hit and (dt.date.fromisoformat(today) - dt.date.fromisoformat(hit['fetched'])).days < DETAIL_TTL_DAYS:
+    if hit and (hit.get('src') != 'vworld'
+                or (dt.date.fromisoformat(today) - dt.date.fromisoformat(hit['fetched'])).days < DETAIL_TTL_DAYS):
         return hit, 'cache'
-    d, r = fetch_detail(did, aid)
+    addr = a.get('address')
+    if addr not in memo:
+        memo[addr] = ned_detail(Z, addr)
+    d, src, why = memo[addr]
     if d:
-        _streak.clear()
-        cache[key] = dict(trim_detail(d), fetched=today)
+        if hit and not d['buildings'] and hit.get('buildings'):
+            d = dict(d, buildings=hit['buildings'])
+        cache[key] = dict(d, fetched=today)
         return cache[key], 'fetch'
-    kind = 'fail' if d is None else 'empty'
-    dump_detail(kind, DETAIL_URL.format(did, aid), aid, r)
-    _streak.append(kind)
-    if len(_streak) >= DETAIL_STREAK_STOP:
-        raise Blocked(f'새 상세 {len(_streak)}건 연속 누락(응답 이상 {_streak.count("fail")} · 빈 상세 {_streak.count("empty")})'
-                      ' — 상세 경로 전체가 막혔다(구조 개편 또는 자동화 제한). 첫 응답은 위 「상세 누락 첫 응답」 줄')
+    if src not in _first_miss:
+        _first_miss[src] = why
+        print(f'   상세 누락 첫 사례({MISS_LABEL[src]}): {Z["title"]} {addr} — {why}', file=sys.stderr)
     if hit:   # 필지·연면적은 바뀌지 않는다 — 지난 값이 없는 것보다 낫다
         return hit, 'stale'
-    return d, kind
+    return None, src
 
 
 # ---------------------------------------------------------------- 채점
@@ -586,9 +644,9 @@ def links(r):
     return out
 
 
-def render_md(Z, rows, n_registered, basedate, bsrc, has_poly, today, st, pmin, pmax):
+def render_md(Z, rows, n_registered, basedate, bsrc, has_poly, today, st, pmin, pmax, manual=False):
     L = ['## 매물 (참고 · D · 본표 편입 금지 · 예산 필터)', '']
-    src = f'재개발닷컴 [{Z["title"]} 매물 페이지](https://jaegebal.com/develops/{Z["did"]}/asks) 자동 수집 {today}'
+    src = f'재개발닷컴 [{Z["title"]} 매물 페이지](https://jaegebal.com/develops/{Z["did"]}/asks) {"수동 저장" if manual else "자동 수집"} {today}'
     n_dedup, span = st['n_dedup'], st['span']
     band = f'호가 {pmin:.2f}억 이상 {pmax:.2f}억 이하'
     budget = f'예산 기준은 실거주 초기투자금(대출 포함) 상한 {pmax:.0f}억·이상 구간 {pmin:.0f}~{pmin + 1:.0f}억이며 호가 그대로 판정한다 — 취득세·중개비 별도(빌라 약 4~5%).'
@@ -602,7 +660,7 @@ def render_md(Z, rows, n_registered, basedate, bsrc, has_poly, today, st, pmin, 
         return '\n'.join(L) + '\n'
     bd = f'{basedate}({bsrc})' if basedate else '미확인'
     poly = '구역계 폴리곤(재개발닷컴) 대조 완료' + (' — 전 건 구역 내' if not any(r['inside'] is False for r in rows) else '') if has_poly else '구역계 폴리곤 없음 — 구역 내 여부 미대조'
-    L.append(f'{src} — 등록 {n_registered}건, 중복 제거 {n_dedup}건, **예산 필터({band}) 통과 {st["n_inb"]}건 + 저가 예외 {st["n_exc"]}건 = 표 {len(rows)}건**({n_dedup - len(rows)}건 제외).{rng} **호가·매물이며 실거래가 아니다(D).** 점수는 구역 전체 {n_dedup}건 기준 상대 순위(100점, 채점 규칙 DECISIONS #19)이며 어떤 계산에도 쓰지 않는다. {budget}{exc} 기준 앵커: {Z["anchor"]}. 권리산정기준일 {bd}. {poly}. 대지지분(≈)은 필지면적 × 전용/총연면적 근사.')
+    L.append(f'{src} — 등록 {n_registered}건, 중복 제거 {n_dedup}건, **예산 필터({band}) 통과 {st["n_inb"]}건 + 저가 예외 {st["n_exc"]}건 = 표 {len(rows)}건**({n_dedup - len(rows)}건 제외).{rng} **호가·매물이며 실거래가 아니다(D).** 점수는 구역 전체 {n_dedup}건 기준 상대 순위(100점, 채점 규칙 DECISIONS #19)이며 어떤 계산에도 쓰지 않는다. {budget}{exc} 기준 앵커: {Z["anchor"]}. 권리산정기준일 {bd}. {poly}. 대지지분(≈)은 필지면적 × 전용/총연면적 근사(필지면적·연면적은 토지특성·건축물대장, 브이월드).')
     L += ['', '| 순위 | 물건 | 점수 | 호가 | 유형 | 면적 | 층 | 사용승인 | 메모 | 링크 |', '| --: | :-- | --: | --: | :-- | :-- | :-- | :-- | :-- | :-- |']
     for r in rows:
         if r['is_land']:
@@ -641,8 +699,8 @@ def r_(v, nd):
     return None if v is None else round(v, nd)
 
 
-def history_records(Z, st, basedate, bsrc, has_poly, stage, n_registered, today, pmin, pmax):
-    """회차 스냅샷 레코드. `t` 로 종류를 구분한다 — 구역당 zone 1행 + 필터 전 전체 ask N행.
+def history_records(Z, st, basedate, bsrc, has_poly, stage, n_registered, today, pmin, pmax, mode='auto'):
+    """회차 스냅샷 레코드. `t` 로 종류를 구분한다 — 구역당 zone 1행 + 필터 전 전체 ask N행. mode 는 목록 출처(auto 자동수집 · manual 수동 저장본).
 
     md 는 예산 통과분만 싣지만 이력은 필터 전 전체를 남긴다. 예산 기준이 바뀌어도 과거 회차를 다시 계산할 수 있어야 한다.
     통과 0건인 구역도 zone 행은 남는다 — '수집했으나 0건'과 '수집 실패'를 구분하기 위해서다.
@@ -653,7 +711,7 @@ def history_records(Z, st, basedate, bsrc, has_poly, stage, n_registered, today,
                 kept=st['n_inb'] + st['n_exc'], cut=st['cut'],
                 price_min=r_(span[0], 4) if span else None, price_max=r_(span[1], 4) if span else None,
                 budget_min=pmin, budget_max=pmax,
-                basedate=basedate, basedate_src=bsrc if basedate else None, poly=has_poly)]
+                basedate=basedate, basedate_src=bsrc if basedate else None, poly=has_poly, mode=mode)]
     for r in st['all']:
         loc = r['loc'] if isinstance(r['loc'], list) else None
         out.append(dict(t='ask', date=today, zone=Z['name'], id=r['id'], addr=r['addr'], typ=r['typ'],
@@ -683,22 +741,32 @@ def main():
     ap.add_argument('--history-dir', default=os.path.join(ROOT, 'data', 'listings'), help='회차 스냅샷 jsonl 디렉터리. 기본 data/listings')
     ap.add_argument('--min-price', type=float, default=PRICE_MIN, help=f'예산 필터 하한(억, 이상). 기본 {PRICE_MIN}')
     ap.add_argument('--max-price', type=float, default=PRICE_MAX, help=f'예산 필터 상한(억, 이하). 기본 {PRICE_MAX}')
-    ap.add_argument('--dump-dir', help='상세 누락의 첫 응답(종류마다 1건)을 이 디렉터리에 저장. 없으면 로그 한 줄만')
+    ap.add_argument('--from-dir', help='사람이 저장한 목록 페이지(jaegebal-<did>-*.txt) 디렉터리 — 재개발닷컴 요청 0건, 저장본 있는 구역만')
     args = ap.parse_args()
-    global _dump_dir
-    _dump_dir = args.dump_dir
     pmin, pmax = args.min_price, args.max_price
     only = set(args.only.split(',')) if args.only else None
+    manual = args.from_dir
     today = dt.datetime.now(KST).strftime('%Y-%m-%d')
+    key = vworld_key()
+    if not key:
+        print('FAIL  VWORLD_API_KEY 없음(환경변수·.env) — 상세(필지면적·연면적)를 받을 수 없어 수집하지 않는다', file=sys.stderr)
+        return 1
+    ned.params = dict(key=key)
     if args.out:
         os.makedirs(args.out, exist_ok=True)
     cache_path = os.path.join(args.history_dir, 'details.json')
     cache = load_cache(cache_path)
     done, errors, detail_fail = {}, {}, {}   # 구역 index → 결과 / 오류 / 상세 누락 건수
-    src_n = dict(cache=0, fetch=0, stale=0, fail=0, empty=0)   # 상세 출처별 건수 — 끝난 구역만 센다
-    seen, blocked = set(), None   # 이번 회차 목록에 나온 매물 id · 차단으로 멈춘 사유
-    first = todo = [i for i, Z in enumerate(ZONES) if not only or Z['name'] in only]
-    for rnd in range(2):   # 2바퀴째는 1바퀴에서 실패한 구역만, 쿨다운 뒤 다시 돈다 — 상세는 캐시가 받아 둔 것을 다시 받지 않는다
+    src_n = dict(cache=0, fetch=0, stale=0, fail=0, empty=0, nopnu=0)   # 상세 출처별 건수 — 끝난 구역만 센다
+    nobldg, short = 0, []   # 건축물 연령 자료 없는 매물 수 · 저장본이 목록 일부만 담은 구역
+    seen, blocked, memo = set(), None, {}   # 이번 회차 목록에 나온 매물 id · 차단으로 멈춘 사유 · 주소별 상세
+    first = todo = [i for i, Z in enumerate(ZONES) if (not only or Z['name'] in only)
+                    and (not manual or glob.glob(os.path.join(manual, f'jaegebal-{Z["did"]}-*.txt')))]
+    if manual and not first:
+        print(f'FAIL  저장본 없음 — {manual} 에 jaegebal-<develop id>-*.txt 가 하나도 없다', file=sys.stderr)
+        return 1
+    full = len(first) == len(ZONES)   # 전 구역 회차인가 — 아니면 스냅샷은 .partial, 캐시 정리도 하지 않는다
+    for rnd in range(1 if manual else 2):   # 2바퀴째는 1바퀴에서 실패한 구역만, 쿨다운 뒤 다시 돈다. 저장본은 다시 읽어도 같아 1바퀴
         if rnd:
             todo = sorted(errors)
             if not todo:
@@ -708,8 +776,14 @@ def main():
         for i in todo:
             Z = ZONES[i]
             try:
-                asks, meta = fetch_list(Z['did'])
-                got = {aid: detail_for(Z['did'], aid, cache, today) for aid in asks}
+                if manual:
+                    asks, meta, fname = load_saved(Z['did'], manual)
+                    print(f'   {Z["title"]}: 저장본 {fname}', file=sys.stderr)
+                    if meta.get('ask_count') and len(asks) < meta['ask_count']:
+                        short.append(f'{Z["title"]} {len(asks)}/{meta["ask_count"]}')
+                else:
+                    asks, meta = fetch_list(Z['did'])
+                got = {aid: detail_for(Z, aid, a, cache, today, memo) for aid, a in asks.items()}
             except Blocked as e:
                 blocked = errors[i] = f'{Z["title"]}: {e}'
                 print(f'!! {blocked} — 더 보내지 않고 멈춘다', file=sys.stderr)
@@ -719,27 +793,32 @@ def main():
                 print(f'!! {Z["title"]}: {e}', file=sys.stderr)
                 continue
             n_src = dict.fromkeys(src_n, 0)
+            zone_nobldg = 0
             for aid, a in asks.items():
                 d, src = got[aid]
                 n_src[src] += 1
                 a['_detail'] = d or {}
-            nfail = n_src['fail'] + n_src['empty']   # 빈 상세도 누락이다 — 상세 구조가 바뀌면 전 매물이 여기로 온다(2026-10-16)
+                zone_nobldg += bool(d) and not d.get('buildings')
+            nfail = n_src['fail'] + n_src['empty'] + n_src['nopnu']
             if nfail > DETAIL_FAIL_RATIO * len(asks) and nfail >= DETAIL_FAIL_MIN:
-                errors[i] = (f'{Z["title"]}: 상세 {nfail}/{len(asks)}건 누락(응답 이상 {n_src["fail"]} · 빈 상세 {n_src["empty"]})'
-                             f' — 상한({DETAIL_FAIL_RATIO:.0%} 초과·{DETAIL_FAIL_MIN}건 이상)')
+                errors[i] = (f'{Z["title"]}: 상세 {nfail}/{len(asks)}건 누락('
+                             + ' · '.join(f'{MISS_LABEL[k]} {n_src[k]}' for k in MISS_LABEL if n_src[k])
+                             + f') — 상한({DETAIL_FAIL_RATIO:.0%} 초과·{DETAIL_FAIL_MIN}건 이상)')
                 print(f'!! {errors[i]}', file=sys.stderr)
                 continue
             errors.pop(i, None)
             seen.update(str(aid) for aid in asks)
             for k, v in n_src.items():
                 src_n[k] += v
+            nobldg += zone_nobldg
             if nfail:
                 detail_fail[i] = nfail
             rows, basedate, bsrc, has_poly, st = score_zone(Z, asks, meta, pmin, pmax)
-            block = render_md(Z, rows, len(asks), basedate, bsrc, has_poly, today, st, pmin, pmax)
+            block = render_md(Z, rows, len(asks), basedate, bsrc, has_poly, today, st, pmin, pmax, manual=bool(manual))
             if args.out:
                 open(os.path.join(args.out, f'md_{Z["name"]}.md'), 'w', encoding='utf-8').write(block)
-            hist = history_records(Z, st, basedate, bsrc, has_poly, meta.get('stage'), len(asks), today, pmin, pmax)
+            hist = history_records(Z, st, basedate, bsrc, has_poly, meta.get('stage'), len(asks), today, pmin, pmax,
+                                   mode='manual' if manual else 'auto')
             prev = write_listing_file(os.path.join(ROOT, 'regions', 'listings', Z['file'] + '.md'), block, args.dry_run)
             top = ' · '.join(f'{r["addr"].split()[-1]}({r["score"]})' for r in rows[:3])
             done[i] = dict(title=Z['title'], prev=prev, now=len(rows), dedup=st['n_dedup'], exc=st['n_exc'], registered=len(asks), stage=meta.get('stage'), top=top, hist=hist)
@@ -747,7 +826,7 @@ def main():
                   + (f' · 상세 누락 {nfail}건' if nfail else '') + f' · 상세 새로 {n_src["fetch"]}·캐시 {n_src["cache"] + n_src["stale"]}')
         if blocked:
             break
-    if not only and not errors:   # 전 구역을 다 돈 회차만 — 목록에서 사라진 매물은 캐시에서도 뺀다
+    if full and not errors:   # 전 구역을 다 돈 회차만 — 목록에서 사라진 매물은 캐시에서도 뺀다
         cache = {k: v for k, v in cache.items() if k in seen}
     save_cache(cache_path, cache)
     untried = [ZONES[i]['title'] for i in first if i not in done and i not in errors]   # 차단으로 멈춰 손대지 못한 구역
@@ -757,20 +836,26 @@ def main():
     total = sum(r['now'] for r in results)
     total_dedup = sum(r['dedup'] for r in results)
     total_exc = sum(r['exc'] for r in results)
-    lines = [f'auto-listings: 매물 절 갱신 {today} — {len(results)}구역 {total}건 (예산 필터 {pmin:.1f}~{pmax:.1f}억, 저가 예외 {total_exc}건)', '']
+    lines = [f'auto-listings: 매물 절 갱신 {today}{" (수동 저장본)" if manual else ""} — {len(results)}구역 {total}건 (예산 필터 {pmin:.1f}~{pmax:.1f}억, 저가 예외 {total_exc}건)', '']
     for r in results:
         lines.append(f'- {r["title"]}: {r["prev"] if r["prev"] is not None else "—"} → {r["now"]}건 (중복 제거 {r["dedup"]}건 중 {r["dedup"] - r["now"]}건 범위 밖, 저가 예외 {r["exc"]}건) · 상위 {r["top"] or "없음"}')
     lines += [f'- 예산 필터: 호가 {pmin:.2f}억 이상 {pmax:.2f}억 이하 + 하한 미만 점수 예외 {total_exc}건 — 전 구역 {total_dedup}건 중 {total_dedup - total}건 제외',
-              f'- 출처: 재개발닷컴 jaegebal.com/develops/{{id}}/asks ({today} 자동수집)', '- 등급: D (호가·매물, 계산 근거 아님)',
-              '- 근거: 자동수집 tools/collect_listings.py · 채점 DECISIONS #19 · 예산 필터 DECISIONS #19 4·5차',
-              f'- 상세: 새로 받음 {src_n["fetch"]}건 · 캐시 {src_n["cache"]}건' + (f' · 다시 받기 실패로 지난 값 {src_n["stale"]}건' if src_n['stale'] else '')
-              + f' (data/listings/details.json, {DETAIL_TTL_DAYS}일 지나면 다시 받음)']
+              f'- 출처: 재개발닷컴 jaegebal.com/develops/{{id}}/asks ({today} ' + ('수동 저장 — 사람이 브라우저로 연 목록 페이지)' if manual else '자동수집)'),
+              '- 등급: D (호가·매물, 계산 근거 아님)',
+              '- 근거: ' + ('수동 저장본' if manual else '자동수집') + ' tools/collect_listings.py · 채점 DECISIONS #19 · 예산 필터 DECISIONS #19 4·5차 · 상세 출처 DECISIONS #19 8차',
+              f'- 상세(필지면적·연면적): 브이월드 NED 새로 받음 {src_n["fetch"]}건 · 캐시 {src_n["cache"]}건' + (f' · 다시 받기 실패로 지난 값 {src_n["stale"]}건' if src_n['stale'] else '')
+              + f' (호출 {_ned_calls}회, data/listings/details.json, {DETAIL_TTL_DAYS}일 지나면 다시 받음)',
+              f'- 재개발닷컴 요청 {_sent}건' + (' — 수동 저장본 ' + f'{len(first)}구역' if manual else f' (상한 {JAEGEBAL_MAX_REQUESTS})')]
+    if nobldg:   # 연면적이 없으면 다세대 지분이 비고 그 축은 중간값이 된다 — 조용히 넘기지 않는다
+        lines.append(f'- 건축물 연령 자료 없음 {nobldg}건 — 브이월드 공백(2018년 이후 사용승인분 전부·오래된 건물 일부). 연면적 없이 채점(다세대는 지분 미상)')
+    if short:
+        lines.append('- 저장본 목록이 일부만(저장 건수/등록 건수): ' + ' · '.join(short) + ' — 2쪽 이상은 저장되지 않는다')
     if _tokens:
         lines.append(f'- 재개발닷컴 WAF 토큰 브라우저 발급 시도 {_tokens}회 (헤드리스 Chromium)')
     if _pauses:
         lines.append(f'- 재개발닷컴 차단 쉼 {_pauses}회(각 {BLOCK_WAIT}초, 요청 간격 {REQUEST_INTERVAL:.0f} → {_interval:.0f}초) — 차단 응답 상태·헤더는 실행 로그')
     if detail_fail:   # 상세가 빠진 매물은 대지·연면적(→ 지분·단가) 없이 채점되고, 권리산정기준일 추정에서도 빠진다 — 조용히 넘기지 않는다
-        lines.append(f'- 상세 누락(응답 이상 {src_n["fail"]} · 빈 상세 {src_n["empty"]}): '
+        lines.append('- 상세 누락(' + ' · '.join(f'{MISS_LABEL[k]} {src_n[k]}' for k in MISS_LABEL if src_n[k]) + '): '
                      + ' · '.join(f'{ZONES[i]["title"]} {n}건' for i, n in sorted(detail_fail.items())))
     if errors:
         lines += ['', '수집 실패:'] + [f'- {e}' for e in errors]
@@ -782,7 +867,7 @@ def main():
     print('\n' + summary)
     if history:
         # 부분 스냅샷(구역 일부만 돌았거나 실패가 섞인 회차)은 .partial 로 떨어뜨린다 — gitignore 되어 이력에 섞이지 않는다
-        partial = bool(only) or bool(errors)
+        partial = not full or bool(errors)
         os.makedirs(args.history_dir, exist_ok=True)
         hp = os.path.join(args.history_dir, f'{today}{".partial" if partial else ""}.jsonl')
         write_history(hp, history)
