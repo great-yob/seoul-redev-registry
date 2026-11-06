@@ -31,7 +31,10 @@ PC 작업 스케줄러가 매주 목요일 09:00 KST에 tools/listings_local.py 
   재개발닷컴에서 받아 둔 값은 다시 받을 길이 없으니 만료시키지 않는다.
 - 재개발닷컴 요청은 실행당 JAEGEBAL_MAX_REQUESTS 건이 상한이다(브라우저 토큰 발급의 문서 요청 포함). 넘기 전에 멈춘다.
 - `--from-dir DIR`: 사람이 브라우저로 열어 저장한 목록 페이지(`listings_local.py --install-manual` 의 북마클릿이 만든
-  `jaegebal-<develop id>-YYYYMMDD-HHMM.txt`)를 읽는다 — 재개발닷컴 요청 0건. 저장본이 있는 구역만 갱신하고(부분 회차), 2바퀴째는 없다.
+  `jaegebal-<develop id>-YYYYMMDD-HHMM.txt`, 2쪽 이상은 `…-p2.txt`)를 읽는다 — 재개발닷컴 요청 0건. 저장본이 있는 구역만 갱신하고(부분 회차), 2바퀴째는 없다.
+- 2026-11-06 재개발닷컴 목록 형식이 바뀌었다(로그인해도 같다): 전용면적 `area2` → `property.junyoung_area`, 층·매물 좌표·구역계 폴리곤이
+  목록에서 빠졌고, 네이버 출처 매물 약 1/3 은 주소가 동 이름만이다. 좌표는 브이월드 지오코더로 받고(구역 sgg + 주소), 층이 구역 전체에 없으면
+  행마다 '층 미상'을 달지 않는다(층 축은 기존대로 미상 0.55배). 지번 비공개 매물은 표에 남기고 지분·단가 없이 채점한다 — 누락으로 세지 않는다(사용자 결정, DECISIONS #19 9차).
 - 2026-10-23부터 재개발닷컴은 첫 요청부터 AWS WAF Challenge(202, 브라우저 JS 로 토큰 발급)를 건다 — 요청 수와 무관하다.
   Challenge 응답이면 먼저 헤드리스 Chromium(Playwright)으로 그 페이지를 열어 `aws-waf-token` 쿠키를 받고, 쿠키와 브라우저 UA 를
   requests 세션에 옮겨 같은 요청을 다시 보낸다(실행당 TOKEN_REFRESHES 회). 토큰이 Challenge 를 면제하는 시간은 약 5분이라
@@ -82,21 +85,22 @@ LAND_TYPES = ('단독', '토지', '다가구')
 PRICE_MIN, PRICE_MAX = 5.0, 8.0   # 억. PRICE_MIN 이상 ~ PRICE_MAX 이하(양끝 포함)
 
 # 구역 설정. basedate 는 레지스트리 확정값(없으면 None → 상세 캐시에 남은 재개발닷컴 right_basedate 를 채점에만 사용).
+# sgg 는 지오코더에 붙이는 시·구(목록에서 좌표가 빠져 주소로 좌표를 받는다, 2026-11-06).
 # bjd 는 매물 주소 동 이름 → 법정동코드 10자리(PNU 앞부분). 2026-11-06 브이월드 지오코더 level4LC 로 동마다 확정 —
 # 저장된 응답에서 거꾸로 뽑으면 틀린다(장위15 상월곡동을 1129014200 으로 찌른 Q15 태스크가 5건 전부 빈 응답이었다. 맞는 값 1129013700).
 # anchor 는 노트에 찍는 기준 앵커 문구(레지스트리 요약). 구역 파일의 사실이 바뀌면 여기도 맞춘다.
 ZONES = [
-    dict(name='dapsimni489', did='2153', title='답십리동 489', file='01_dapsimni489', bjd={'답십리동': '1123010500'}, basedate='2023-12-07', anchor='구역 내 2026 중개거래 중앙 5.90억(단독다가구 지문 복원 3건, A) · 실거래/개별주택가격 배율 2.70(9건, A) · 개별공시지가 중앙 396만원/㎡(378필지, A)'),
-    dict(name='jayang655', did='4641', title='자양1동 655', file='02_jayang655', bjd={'자양동': '1121510500'}, basedate='2026-05-18', anchor='폴리곤 대조 구역 내 21건 중앙값 5.20억(2026, A) · 실거래/공시 배율 중앙 2.85(n=21, A)'),
-    dict(name='cheonho338', did='1738', title='천호동 338', file='03_cheonho338', bjd={'천호동': '1174010900'}, basedate='2024-05-23', anchor='폴리곤 대조 구역 내 52건 중앙값 5.00억(2026, A) · 실거래/공시 배율 중앙 2.93(n=52, A)'),
-    dict(name='jangwi15', did='2327', title='장위15', file='04_jangwi15', bjd={'장위동': '1129013800', '상월곡동': '1129013700'}, basedate=None, anchor='233-42 실거래 10.00억(2026-06, 대지권 61.32㎡, A)'),
-    dict(name='sangdo16', did='3691', title='상도16', file='05_sangdo16', bjd={'상도동': '1159010200'}, basedate='2025-05-23', anchor='구역 내 실거래 중앙값 4.60억 · 대지권27㎡+ 중앙값 5.70억(A)'),
-    dict(name='galhyeon510-1', did='4640', title='갈현동 510-1(갈현3)', file='06_galhyeon510-1', bjd={'갈현동': '1138010400'}, basedate='2026-07-01', anchor='폴리곤 대조 구역 내 78건 중앙값 2.51억(2026, A) · 실거래/공시 배율 중앙 1.92(n=69, A)'),
-    dict(name='sutaek2', did='4074', title='수택2', file='07_sutaek2', bjd={'수택동': '4131010500'}, basedate='2023-07-14', anchor='폴리곤 대조 구역 내 149건 중앙값 4.35억(2026, A) · 고시 권리자 분양가 35평형 6.77억·보정률 1.65·비례율 108.13%(고시 제2023-94호, A)'),
-    dict(name='daejo212', did='4577', title='대조동212(가칭)', file='08_daejo212', bjd={'대조동': '1138010600'}, basedate=None, anchor='폴리곤 대조 구역 내 52건 중앙값 3.23억(2026, A) · 권리산정기준일 미지정'),
-    dict(name='guui2donga', did='4141', title='구의2동A구역(구의동 46)', file='09_guui2dong46', bjd={'구의동': '1121510300'}, basedate='2026-01-27', anchor='폴리곤 대조 구역 내 58건 중앙값 5.70억(2026, A) · 실거래/공시 배율 중앙 3.19(n=59, A) · 토허 대상'),
-    dict(name='seokchon-gobun1', did='4916', title='석촌고분1구역(석촌동 232 일대)', file='10_seokchon-gobun1', bjd={'석촌동': '1171010500'}, basedate=None, anchor='폴리곤 대조 구역 내 80건 중앙값 4.23억(2026, A) · 실거래/공시 배율 중앙 2.19(n=80, A) · 권리산정기준일 미지정 · 민간 도심복합'),
-    dict(name='seokchon-gobun2', did='4917', title='석촌고분2구역(석촌동 232 일대)', file='11_seokchon-gobun2', bjd={'석촌동': '1171010500'}, basedate=None, anchor='폴리곤 대조 구역 내 30건 중앙값 4.80억(2026, A) · 실거래/공시 배율 중앙 2.11(n=30, A) · 권리산정기준일 미지정 · 민간 도심복합'),
+    dict(name='dapsimni489', did='2153', title='답십리동 489', file='01_dapsimni489', sgg='서울특별시 동대문구', bjd={'답십리동': '1123010500'}, basedate='2023-12-07', anchor='구역 내 2026 중개거래 중앙 5.90억(단독다가구 지문 복원 3건, A) · 실거래/개별주택가격 배율 2.70(9건, A) · 개별공시지가 중앙 396만원/㎡(378필지, A)'),
+    dict(name='jayang655', did='4641', title='자양1동 655', file='02_jayang655', sgg='서울특별시 광진구', bjd={'자양동': '1121510500'}, basedate='2026-05-18', anchor='폴리곤 대조 구역 내 21건 중앙값 5.20억(2026, A) · 실거래/공시 배율 중앙 2.85(n=21, A)'),
+    dict(name='cheonho338', did='1738', title='천호동 338', file='03_cheonho338', sgg='서울특별시 강동구', bjd={'천호동': '1174010900'}, basedate='2024-05-23', anchor='폴리곤 대조 구역 내 52건 중앙값 5.00억(2026, A) · 실거래/공시 배율 중앙 2.93(n=52, A)'),
+    dict(name='jangwi15', did='2327', title='장위15', file='04_jangwi15', sgg='서울특별시 성북구', bjd={'장위동': '1129013800', '상월곡동': '1129013700'}, basedate=None, anchor='233-42 실거래 10.00억(2026-06, 대지권 61.32㎡, A)'),
+    dict(name='sangdo16', did='3691', title='상도16', file='05_sangdo16', sgg='서울특별시 동작구', bjd={'상도동': '1159010200'}, basedate='2025-05-23', anchor='구역 내 실거래 중앙값 4.60억 · 대지권27㎡+ 중앙값 5.70억(A)'),
+    dict(name='galhyeon510-1', did='4640', title='갈현동 510-1(갈현3)', file='06_galhyeon510-1', sgg='서울특별시 은평구', bjd={'갈현동': '1138010400'}, basedate='2026-07-01', anchor='폴리곤 대조 구역 내 78건 중앙값 2.51억(2026, A) · 실거래/공시 배율 중앙 1.92(n=69, A)'),
+    dict(name='sutaek2', did='4074', title='수택2', file='07_sutaek2', sgg='경기도 구리시', bjd={'수택동': '4131010500'}, basedate='2023-07-14', anchor='폴리곤 대조 구역 내 149건 중앙값 4.35억(2026, A) · 고시 권리자 분양가 35평형 6.77억·보정률 1.65·비례율 108.13%(고시 제2023-94호, A)'),
+    dict(name='daejo212', did='4577', title='대조동212(가칭)', file='08_daejo212', sgg='서울특별시 은평구', bjd={'대조동': '1138010600'}, basedate=None, anchor='폴리곤 대조 구역 내 52건 중앙값 3.23억(2026, A) · 권리산정기준일 미지정'),
+    dict(name='guui2donga', did='4141', title='구의2동A구역(구의동 46)', file='09_guui2dong46', sgg='서울특별시 광진구', bjd={'구의동': '1121510300'}, basedate='2026-01-27', anchor='폴리곤 대조 구역 내 58건 중앙값 5.70억(2026, A) · 실거래/공시 배율 중앙 3.19(n=59, A) · 토허 대상'),
+    dict(name='seokchon-gobun1', did='4916', title='석촌고분1구역(석촌동 232 일대)', file='10_seokchon-gobun1', sgg='서울특별시 송파구', bjd={'석촌동': '1171010500'}, basedate=None, anchor='폴리곤 대조 구역 내 80건 중앙값 4.23억(2026, A) · 실거래/공시 배율 중앙 2.19(n=80, A) · 권리산정기준일 미지정 · 민간 도심복합'),
+    dict(name='seokchon-gobun2', did='4917', title='석촌고분2구역(석촌동 232 일대)', file='11_seokchon-gobun2', sgg='서울특별시 송파구', bjd={'석촌동': '1171010500'}, basedate=None, anchor='폴리곤 대조 구역 내 30건 중앙값 4.80억(2026, A) · 실거래/공시 배율 중앙 2.11(n=30, A) · 권리산정기준일 미지정 · 민간 도심복합'),
 ]
 
 session = requests.Session()
@@ -124,6 +128,14 @@ DETAIL_FAIL_RATIO, DETAIL_FAIL_MIN = 0.10, 3   # 구역 상세 누락이 10%를 
 NED_BASE = 'https://api.vworld.kr/ned/data/'
 NED_RETRIES = 4                 # 브이월드 일시 오류(URL_TYPE·5xx·네트워크) 재시도 — 같은 PNU 10번에 2~3번 URL_TYPE 이 난다(vworld_probe 실측)
 ADDR_RE = re.compile(r'^(\S+)\s+(산\s?)?(\d+)(?:-(\d+))?$')   # 「장위동 262-14」「갈현동 산12-3」 — 동 이름 + 지번
+GEOCODER = 'https://api.vworld.kr/req/address'
+SAVED_RE = re.compile(r'^jaegebal-(\d+)-(\d{8}-\d{4})(?:-p(\d+))?(?: \(\d+\))?\.txt$')   # 수동 저장본 이름. 「 (1)」은 브라우저 중복 이름
+
+
+def masked(addr):
+    """지번이 가려진 주소인가 — 「답십리동」처럼 동 이름 한 마디. 2026-11-06 부터 재개발닷컴이 네이버 출처 매물 약 1/3 의 지번을 가린다
+    (로그인해도 같다). 필지를 특정할 수 없어 지분·단가는 비우고 '지번 비공개'로 싣는다 — 수집 누락이 아니다(DECISIONS #19 9차)."""
+    return bool(re.fullmatch(r'\S+[동가리]', (addr or '').strip()))
 
 
 class CollectError(Exception):
@@ -329,23 +341,31 @@ def load_saved(did, from_dir):
 
     파일은 `listings_local.py --install-manual` 의 북마클릿이 만든다: 첫 줄 `<!-- fmt=scripts|next_f url=… saved=… -->` 뒤에
     페이지의 플라이트 스크립트 원문(scripts — HTTP 응답과 같은 이스케이프) 또는 이미 풀린 플라이트 문자열(next_f).
-    같은 구역 저장본이 여럿이면 파일명(…-YYYYMMDD-HHMM)이 가장 늦은 것을 쓴다. 다른 구역 데이터가 든 파일(사이트 안 링크로
-    옮겨 다니면 스크립트가 첫 페이지 것으로 남는다)과 매물 데이터가 없는 파일은 CollectError — 조용히 0건으로 쓰지 않는다."""
-    fs = sorted(glob.glob(os.path.join(from_dir, f'jaegebal-{did}-*.txt')))
-    if not fs:
+    같은 구역 저장본이 여럿이면 1쪽은 파일명(…-YYYYMMDD-HHMM)이 가장 늦은 것을 쓰고, 2쪽 이상(`…-HHMM-p2.txt`)은 그 1쪽 이후에
+    저장한 것 가운데 쪽마다 가장 늦은 것을 합친다. 다른 구역 데이터가 든 파일(사이트 안 링크로 옮겨 다니면 스크립트가 첫 페이지 것으로
+    남는다)과 매물 데이터가 없는 파일은 CollectError — 조용히 0건으로 쓰지 않는다."""
+    pages = {}
+    for p in glob.glob(os.path.join(from_dir, f'jaegebal-{did}-*.txt')):
+        m = SAVED_RE.match(os.path.basename(p))
+        if m and m.group(1) == did:
+            pages.setdefault(int(m.group(3) or 1), []).append((m.group(2), os.path.basename(p), p))
+    if 1 not in pages:
         return None
-    path = fs[-1]
-    name = os.path.basename(path)
-    t = io.open(path, encoding='utf-8').read()
-    u = t if t.startswith('<!-- fmt=next_f') else unesc(t)
-    ids = set(re.findall(r'"develop_id":(\d+),"develop_title"', u))
-    if ids and did not in ids:
-        raise CollectError(f'{name}: 다른 구역 데이터(develop {", ".join(sorted(ids))}) — 그 구역 페이지에서 새로고침(F5) 뒤 다시 저장')
-    meta = parse_meta(u)
-    asks = extract_asks(u)
+    stamp = max(pages[1])[0]
+    chosen = [(n, *max(v)[1:]) for n, v in sorted(pages.items()) if n == 1 or max(v)[0] >= stamp]
+    asks, meta = {}, None
+    for n, name, path in chosen:
+        t = io.open(path, encoding='utf-8').read()
+        u = t if t.startswith('<!-- fmt=next_f') else unesc(t)
+        ids = set(re.findall(r'"develop_id":(\d+),"develop_title"', u))
+        if ids and did not in ids:
+            raise CollectError(f'{name}: 다른 구역 데이터(develop {", ".join(sorted(ids))}) — 그 구역 페이지에서 새로고침(F5) 뒤 다시 저장')
+        if n == 1:
+            meta = parse_meta(u)
+        asks.update(extract_asks(u))
     if not asks and meta['ask_count'] is None:
-        raise CollectError(f'{name}: 매물 데이터 없음 — 페이지가 다 뜬 뒤 다시 저장')
-    return asks, meta, name
+        raise CollectError(f'{chosen[0][1]}: 매물 데이터 없음 — 페이지가 다 뜬 뒤 다시 저장')
+    return asks, meta, ' + '.join(name for _, name, _ in chosen)
 
 
 # ---------------------------------------------------------------- 상세 (브이월드 NED)
@@ -415,10 +435,31 @@ def pnu_for(Z, addr):
     return f'{code}{"2" if m.group(2) else "1"}{int(m.group(3)):04d}{int(m.group(4) or 0):04d}', None
 
 
+def ned_point(Z, addr):
+    """[경도, 위도] 또는 None — 브이월드 지오코더(PARCEL)로 「시·구 + 매물 주소」의 필지 좌표. 재개발닷컴 목록에서 매물 좌표가 빠져
+    (2026-11-06) 네이버 지도 링크·구역계 대조에 쓴다. 못 받아도 누락이 아니다(링크만 빠진다)."""
+    global _ned_calls
+    for i in range(3):
+        _ned_calls += 1
+        try:
+            r = ned.get(GEOCODER, params=dict(service='address', request='getcoord', version='2.0', crs='epsg:4326', type='PARCEL',
+                                              refine='true', simple='true', format='json', address=f'{Z["sgg"]} {addr}'), timeout=25)
+            js = r.json().get('response') or {}
+            if js.get('status') == 'OK':
+                p = js['result']['point']
+                return [float(p['x']), float(p['y'])]
+            if js.get('status') == 'NOT_FOUND':
+                return None
+        except (requests.RequestException, ValueError, KeyError, TypeError):
+            pass
+        time.sleep(0.5 * (i + 1))
+    return None
+
+
 def ned_detail(Z, addr):
     """(상세, 출처, 사유). 상세는 채점이 읽는 모양 {address:{land_area, location}, buildings:[{tot_area}], right_basedate} + pnu·src.
     출처: fetch 받음 · nopnu 주소→PNU 실패 · fail 조회 오류 · empty 토지특성 자료 없음(필지가 없다 = PNU 가 틀렸다).
-    건축물 연령이 비면(2018년 이후 사용승인·나대지) buildings=[] 로 받는다 — 누락이 아니다. 좌표는 목록에 있어 None."""
+    건축물 연령이 비면(2018년 이후 사용승인·나대지) buildings=[] 로 받는다 — 누락이 아니다. 좌표는 지오코더(ned_point)."""
     pnu, why = pnu_for(Z, addr)
     if not pnu:
         return None, 'nopnu', why
@@ -433,7 +474,7 @@ def ned_detail(Z, addr):
     latest = max(land, key=lambda r: str(r.get('stdrYear') or ''))   # stdrYear 없이 부르면 2013~ 연도별로 온다
     # 같은 동이 두 번 오기도 한다(천호동 338-32 나동 — 식별번호 같음). 그대로 더하면 1979㎡, 지우면 재개발닷컴과 같은 1319.41㎡
     uniq = {b.get('buldIdntfcNo') or (b.get('buldDongNm'), b.get('buldTotar'), b.get('useConfmDe')): b for b in bld}
-    return dict(address=dict(land_area=num(latest.get('lndpclAr')), location=None),
+    return dict(address=dict(land_area=num(latest.get('lndpclAr')), location=ned_point(Z, addr)),
                 buildings=[dict(tot_area=num(b.get('buldTotar'))) for b in uniq.values()],
                 right_basedate=None, pnu=pnu, src='vworld'), 'fetch', None
 
@@ -468,6 +509,8 @@ def detail_for(Z, aid, a, cache, today, memo):
                 or (dt.date.fromisoformat(today) - dt.date.fromisoformat(hit['fetched'])).days < DETAIL_TTL_DAYS):
         return hit, 'cache'
     addr = a.get('address')
+    if masked(addr):   # 지번 비공개 — 찌를 필지가 없다. 누락으로 세지 않는다(DECISIONS #19 9차)
+        return hit, ('stale' if hit else 'masked')
     if addr not in memo:
         memo[addr] = ned_detail(Z, addr)
     d, src, why = memo[addr]
@@ -514,9 +557,18 @@ def score_zone(Z, asks, meta, pmin, pmax):
         rb = [a['_detail'].get('right_basedate') for a in asks.values() if isinstance(a['_detail'].get('right_basedate'), str)]
         if rb:
             basedate, bsrc = sorted(rb)[0][:10], '재개발닷컴'
+    # 2026-11-06 재개발닷컴 목록 형식 변경: 전용면적 area2 → property.junyoung_area, 층·좌표 빠짐, 네이버 출처 약 1/3 지번 가림.
+    # 단독 연면적은 property.floor_area 로 온다(브이월드 건축물 연령이 비면 메모용으로 쓴다)
+    for a in asks.values():
+        pr = a.get('property') or {}
+        a['_a2'] = a.get('area2') or pr.get('junyoung_area') or 0
+        a['_floor_area'] = pr.get('floor_area')
+        a['_masked'] = masked(a.get('address'))
+    has_floor = any(a.get('floor') is not None for a in asks.values())   # 구역 전체에 층이 없으면 행마다 '층 미상'을 달지 않는다
     uniq = {}
     for a in sorted(asks.values(), key=lambda x: x['id']):
-        k = (a['address'], a.get('area2'), a['price'])
+        # 지번이 가려지면 같은 동·가격의 다른 집이 겹친다 — 연면적·유형까지 같아야 같은 매물로 본다
+        k = (a['address'], a['_a2'], a['price']) + ((a['_floor_area'], a.get('type_display')) if a['_masked'] else ())
         if k in uniq:
             old = uniq[k]
             fl = a.get('floor') if a.get('floor') is not None else old.get('floor')
@@ -532,15 +584,16 @@ def score_zone(Z, asks, meta, pmin, pmax):
         tot = sum((b.get('tot_area') or 0) for b in blds) or None
         typ = a.get('type_display') or '?'
         is_land = any(t in typ for t in LAND_TYPES)
-        a2 = a.get('area2') or 0
+        a2, hidden = a['_a2'], a['_masked']
         if is_land:
             share = lot
-            note = f'대지 {lot:.1f}' if lot else '대지 미상'
+            tot = tot or a['_floor_area']
+            note = f'대지 {lot:.1f}' if lot else ('대지 미상(지번 비공개)' if hidden else '대지 미상')
             if tot:
                 note += f' · 연면적 {tot:.1f}'
         else:
             share = (lot * a2 / tot) if (lot and tot and a2) else None
-            note = (f'전용 {a2:.1f}' if a2 else '전용 미상') + (f' · 지분≈{share:.1f}' if share else ' · 지분 미상')
+            note = (f'전용 {a2:.1f}' if a2 else '전용 미상') + (f' · 지분≈{share:.1f}' if share else (' · 지분 미상(지번 비공개)' if hidden else ' · 지분 미상'))
         unit = a['price'] / share if share else None
         floor, maxf = a.get('floor'), a.get('max_floor')
         apr = a.get('use_apr_day') or ''
@@ -548,11 +601,11 @@ def score_zone(Z, asks, meta, pmin, pmax):
         after = bool(a.get('is_after_right_basedate')) or (bool(basedate) and bool(apr) and apr[:10] > basedate)
         loc = a.get('location') or ad.get('location')
         inside = any(pip(loc, r) for r in rings) if (rings and isinstance(loc, list)) else None
-        flags = []
+        flags = ['지번 비공개 — 지분·단가 없이 채점'] if hidden else []
         if not is_land:
             if floor is not None and floor <= 0:
                 flags.append('반지하')
-            elif floor is None:
+            elif floor is None and has_floor:
                 flags.append('층 미상')
         if after:
             flags.append('기준일 이후 — 현금청산 위험')
@@ -563,7 +616,8 @@ def score_zone(Z, asks, meta, pmin, pmax):
         if a.get('_dups'):
             flags.append(f'동일 매물 {a["_dups"] + 1}건 중복 등록')
         rows.append(dict(id=a['id'], addr=a['address'], typ=typ, price=a['price'] / 10000, share=share, share_note=note, unit=unit,
-                         floor=floor, maxf=maxf, yr=yr, apr=apr[:7], after=after, inside=inside, flags=flags, loc=loc, is_land=is_land))
+                         floor=floor, maxf=maxf, yr=yr, apr=apr[:7], after=after, inside=inside, flags=flags, loc=loc, is_land=is_land,
+                         masked=hidden))
     lu = sorted(r['unit'] for r in rows if r['is_land'] and r['unit'])
     if len(lu) >= 3:
         med = lu[len(lu) // 2]
@@ -616,7 +670,8 @@ def score_zone(Z, asks, meta, pmin, pmax):
     rows.sort(key=lambda r: (-r['score'], r['price']))
     for i, r in enumerate(rows):
         r['rank'] = i + 1
-    return rows, basedate, bsrc, bool(rings), dict(n_dedup=n_dedup, span=span, n_inb=len(inb), n_exc=n_exc, cut=cut, all=all_rows)
+    return rows, basedate, bsrc, bool(rings), dict(n_dedup=n_dedup, span=span, n_inb=len(inb), n_exc=n_exc, cut=cut, all=all_rows,
+                                                   n_masked=sum(r['masked'] for r in all_rows), no_floor=not has_floor)
 
 
 # ---------------------------------------------------------------- 링크 · md
@@ -659,8 +714,13 @@ def render_md(Z, rows, n_registered, basedate, bsrc, has_poly, today, st, pmin, 
             L.append(f'{src} — 등록 {n_registered}건, 중복 제거 {n_dedup}건, **예산 필터({band}) 통과 0건** — 표에 남길 매물이 없다.{rng} {budget} 기준 앵커: {Z["anchor"]}.')
         return '\n'.join(L) + '\n'
     bd = f'{basedate}({bsrc})' if basedate else '미확인'
+    extra = ''
+    if st.get('no_floor'):
+        extra += ' 층·좌표는 재개발닷컴 목록에서 빠졌다(2026-11-06~) — 공동주택 층 축은 전원 미상(0.55배), 좌표는 브이월드 지오코더.'
+    if st.get('n_masked'):
+        extra += f' 지번 비공개 {st["n_masked"]}건(재개발닷컴이 가림)은 지분·단가 없이 채점한다(두 축 중간값).'
     poly = '구역계 폴리곤(재개발닷컴) 대조 완료' + (' — 전 건 구역 내' if not any(r['inside'] is False for r in rows) else '') if has_poly else '구역계 폴리곤 없음 — 구역 내 여부 미대조'
-    L.append(f'{src} — 등록 {n_registered}건, 중복 제거 {n_dedup}건, **예산 필터({band}) 통과 {st["n_inb"]}건 + 저가 예외 {st["n_exc"]}건 = 표 {len(rows)}건**({n_dedup - len(rows)}건 제외).{rng} **호가·매물이며 실거래가 아니다(D).** 점수는 구역 전체 {n_dedup}건 기준 상대 순위(100점, 채점 규칙 DECISIONS #19)이며 어떤 계산에도 쓰지 않는다. {budget}{exc} 기준 앵커: {Z["anchor"]}. 권리산정기준일 {bd}. {poly}. 대지지분(≈)은 필지면적 × 전용/총연면적 근사(필지면적·연면적은 토지특성·건축물대장, 브이월드).')
+    L.append(f'{src} — 등록 {n_registered}건, 중복 제거 {n_dedup}건, **예산 필터({band}) 통과 {st["n_inb"]}건 + 저가 예외 {st["n_exc"]}건 = 표 {len(rows)}건**({n_dedup - len(rows)}건 제외).{rng} **호가·매물이며 실거래가 아니다(D).** 점수는 구역 전체 {n_dedup}건 기준 상대 순위(100점, 채점 규칙 DECISIONS #19)이며 어떤 계산에도 쓰지 않는다. {budget}{exc} 기준 앵커: {Z["anchor"]}. 권리산정기준일 {bd}. {poly}. 대지지분(≈)은 필지면적 × 전용/총연면적 근사(필지면적·연면적은 토지특성·건축물대장, 브이월드).{extra}')
     L += ['', '| 순위 | 물건 | 점수 | 호가 | 유형 | 면적 | 층 | 사용승인 | 메모 | 링크 |', '| --: | :-- | --: | --: | :-- | :-- | :-- | :-- | :-- | :-- |']
     for r in rows:
         if r['is_land']:
@@ -717,7 +777,7 @@ def history_records(Z, st, basedate, bsrc, has_poly, stage, n_registered, today,
         out.append(dict(t='ask', date=today, zone=Z['name'], id=r['id'], addr=r['addr'], typ=r['typ'],
                         price=r_(r['price'], 4), share=r_(r['share'], 2), unit=r_(r['unit'], 5),
                         floor=r['floor'], max_floor=r['maxf'], use_apr=r['apr'] or None, year=r['yr'],
-                        after_basedate=r['after'], inside=r['inside'], land=r['is_land'],
+                        after_basedate=r['after'], inside=r['inside'], land=r['is_land'], masked=r['masked'],
                         score=r['score'], rank=r.get('rank'), in_budget=r['in_budget'], kept=r['kept'],
                         low_exc=bool(r.get('low_exc')), anom=bool(r.get('anom')), flags=r['flags'],
                         lng=r_(loc[0], 7) if loc else None, lat=r_(loc[1], 7) if loc else None))
@@ -757,7 +817,7 @@ def main():
     cache_path = os.path.join(args.history_dir, 'details.json')
     cache = load_cache(cache_path)
     done, errors, detail_fail = {}, {}, {}   # 구역 index → 결과 / 오류 / 상세 누락 건수
-    src_n = dict(cache=0, fetch=0, stale=0, fail=0, empty=0, nopnu=0)   # 상세 출처별 건수 — 끝난 구역만 센다
+    src_n = dict(cache=0, fetch=0, stale=0, fail=0, empty=0, nopnu=0, masked=0)   # 상세 출처별 건수 — 끝난 구역만 센다. masked 는 누락 아님
     nobldg, short = 0, []   # 건축물 연령 자료 없는 매물 수 · 저장본이 목록 일부만 담은 구역
     seen, blocked, memo = set(), None, {}   # 이번 회차 목록에 나온 매물 id · 차단으로 멈춘 사유 · 주소별 상세
     first = todo = [i for i, Z in enumerate(ZONES) if (not only or Z['name'] in only)
@@ -823,7 +883,8 @@ def main():
             top = ' · '.join(f'{r["addr"].split()[-1]}({r["score"]})' for r in rows[:3])
             done[i] = dict(title=Z['title'], prev=prev, now=len(rows), dedup=st['n_dedup'], exc=st['n_exc'], registered=len(asks), stage=meta.get('stage'), top=top, hist=hist)
             print(f'{Z["title"]:12s} {prev if prev is not None else "-":>3} → {len(rows):3d}건 (등록 {len(asks)}, 중복 제거 {st["n_dedup"]}, 예산 내 {st["n_inb"]}, 저가 예외 {st["n_exc"]}, 단계 {meta.get("stage")}) 상위 {top}'
-                  + (f' · 상세 누락 {nfail}건' if nfail else '') + f' · 상세 새로 {n_src["fetch"]}·캐시 {n_src["cache"] + n_src["stale"]}')
+                  + (f' · 상세 누락 {nfail}건' if nfail else '') + (f' · 지번 비공개 {n_src["masked"]}건' if n_src['masked'] else '')
+                  + f' · 상세 새로 {n_src["fetch"]}·캐시 {n_src["cache"] + n_src["stale"]}')
         if blocked:
             break
     if full and not errors:   # 전 구역을 다 돈 회차만 — 목록에서 사라진 매물은 캐시에서도 뺀다
@@ -846,6 +907,8 @@ def main():
               f'- 상세(필지면적·연면적): 브이월드 NED 새로 받음 {src_n["fetch"]}건 · 캐시 {src_n["cache"]}건' + (f' · 다시 받기 실패로 지난 값 {src_n["stale"]}건' if src_n['stale'] else '')
               + f' (호출 {_ned_calls}회, data/listings/details.json, {DETAIL_TTL_DAYS}일 지나면 다시 받음)',
               f'- 재개발닷컴 요청 {_sent}건' + (' — 수동 저장본 ' + f'{len(first)}구역' if manual else f' (상한 {JAEGEBAL_MAX_REQUESTS})')]
+    if src_n['masked']:
+        lines.append(f'- 지번 비공개 {src_n["masked"]}건 — 재개발닷컴이 네이버 출처 매물의 지번을 가림(2026-11-06~, 로그인해도 같음). 표에 남기되 지분·단가 없이 채점(DECISIONS #19 9차)')
     if nobldg:   # 연면적이 없으면 다세대 지분이 비고 그 축은 중간값이 된다 — 조용히 넘기지 않는다
         lines.append(f'- 건축물 연령 자료 없음 {nobldg}건 — 브이월드 공백(2018년 이후 사용승인분 전부·오래된 건물 일부). 연면적 없이 채점(다세대는 지분 미상)')
     if short:
